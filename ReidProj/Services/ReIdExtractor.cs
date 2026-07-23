@@ -1,0 +1,104 @@
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+
+namespace ReidProj.Services;
+
+/// <summary>
+/// FastReID ONNX 特征提取器 — 接收 RGB 裁剪图，输出归一化特征向量
+/// </summary>
+public sealed class ReIdExtractor : IDisposable
+{
+    private readonly ILogger<ReIdExtractor> _logger;
+    private readonly ImageUtils _imageUtils;
+    private readonly InferenceSession _session;
+    private readonly float[] _pixelBuffer = new float[3 * InputHeight * InputWidth];
+
+    private const int InputHeight = 256;
+    private const int InputWidth = 128;
+
+    public ReIdExtractor(ILogger<ReIdExtractor> logger, ImageUtils imageUtils)
+    {
+        _logger = logger;
+        _imageUtils = imageUtils;
+
+        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "reid_model.onnx");
+        if (!File.Exists(modelPath))
+        {
+            modelPath = Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory, "models", "reid_model.onnx");
+        }
+        if (!File.Exists(modelPath))
+        {
+            throw new FileNotFoundException(
+                "请先运行 scripts/setup_models.py 导出 ReID 模型", modelPath);
+        }
+
+        _logger.LogInformation("加载 ReID 模型: {Path}", modelPath);
+        var opts = new Microsoft.ML.OnnxRuntime.SessionOptions();
+        opts.GraphOptimizationLevel = Microsoft.ML.OnnxRuntime.GraphOptimizationLevel.ORT_ENABLE_ALL;
+        opts.IntraOpNumThreads = 1;
+        opts.InterOpNumThreads = 1;
+        opts.ExecutionMode = Microsoft.ML.OnnxRuntime.ExecutionMode.ORT_SEQUENTIAL;
+        _session = new InferenceSession(modelPath, opts);
+        _logger.LogInformation("ReID 模型加载完成");
+    }
+
+    /// <summary>
+    /// 提取人物特征向量
+    /// </summary>
+    /// <param name="personImage">裁剪后的人物 RGB 图像</param>
+    /// <returns>L2 归一化的特征向量</returns>
+    public byte[] ExtractFeatures(Image<Rgb24> personImage)
+    {
+        var sw = Stopwatch.StartNew();
+
+        // 1. Resize 到 256×128（ReID 期望输入尺寸）
+        using var resized = personImage.Clone(ctx =>
+            ctx.Resize(InputWidth, InputHeight, KnownResamplers.Bicubic));
+
+        // 2. 构建 CHW tensor（原始像素值 [0,1]，mean/std 由 ONNX 图内嵌处理）
+        int h = resized.Height, w = resized.Width;
+        resized.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < h; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < w; x++)
+                {
+                    var p = row[x];
+                    int idx = y * w + x;
+                    _pixelBuffer[idx] = p.R / 255f;
+                    _pixelBuffer[h * w + idx] = p.G / 255f;
+                    _pixelBuffer[2 * h * w + idx] = p.B / 255f;
+                }
+            }
+        });
+        var inputTensor = new DenseTensor<float>(_pixelBuffer, [1, 3, InputHeight, InputWidth]);
+
+        // 3. ONNX 推理
+        using var results = _session.Run(
+            [NamedOnnxValue.CreateFromTensor("input", inputTensor)]);
+
+        // 4. 输出解析 — 特征向量
+        var floats = results[0].AsTensor<float>().ToArray();
+        int featureDim = floats.Length;
+
+        _logger.LogInformation("ReID 特征: dim={Dim}, 耗时 {Elapsed:F1}ms",
+            featureDim, sw.Elapsed.TotalMilliseconds);
+
+        var bytes = new byte[floats.Length * 4];
+        Buffer.BlockCopy(floats, 0, bytes, 0, bytes.Length);
+        return bytes;
+    }
+
+
+    public void Dispose()
+    {
+        _session?.Dispose();
+    }
+}
