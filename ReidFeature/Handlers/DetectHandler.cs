@@ -14,6 +14,7 @@ public static class DetectHandler
         RecyclableMemoryStreamManager streamManager,
         YoloDetector yolo,
         ReIdExtractor reid,
+        FaceDetector faceDetector,
         ILogger<Program> logger)
     {
         using var ms = streamManager.GetStream("detect");
@@ -65,12 +66,41 @@ public static class DetectHandler
                 int y = Math.Clamp(box.Y, 0, image.Height - 1);
                 int w = Math.Max(1, Math.Min(box.Width, image.Width - x));
                 int h = Math.Max(1, Math.Min(box.Height, image.Height - y));
+
                 using var cropped = image.Clone(ctx => ctx.Crop(new Rectangle(x, y, w, h)));
+
+                // ReID 特征提取
                 byte[] features = reid.ExtractFeatures(cropped);
+
+                // 人脸检测（在裁剪图上，坐标映射回原图）
+                FaceDetection? face = null;
+                try
+                {
+                    var faces = faceDetector.Detect(cropped);
+                    if (faces.Count > 0)
+                    {
+                        var best = faces[0]; // 取置信度最高的人脸
+                        face = new FaceDetection(
+                            new BoundingBox(
+                                box.X + best.Bbox.X,
+                                box.Y + best.Bbox.Y,
+                                best.Bbox.Width,
+                                best.Bbox.Height
+                            ),
+                            best.Confidence
+                        );
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "人脸检测失败, 人物 #{Idx}", i);
+                }
+
                 persons[i] = new PersonDetection(
                     Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),
                     Confidence: conf,
-                    Features: features
+                    Features: features,
+                    Face: face
                 );
             }
 

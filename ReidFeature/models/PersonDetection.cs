@@ -6,5 +6,6 @@ namespace ReidFeature.Models;
 public sealed record PersonDetection(
     BoundingBox Bbox,
     float Confidence,
-    byte[] Features
+    byte[] Features,
+    FaceDetection? Face = null
 );

@@ -26,6 +26,7 @@ namespace ReidFeature
             builder.Services.AddSingleton(new RecyclableMemoryStreamManager());
             builder.Services.AddSingleton<YoloDetector>();
             builder.Services.AddSingleton<ReIdExtractor>();
+            builder.Services.AddSingleton<FaceDetector>();
 
             var app = builder.Build();
 
