@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.IO;
 using ReIdSample.Models.Dtos;
 using ReIdSample.Services;
 
@@ -10,12 +11,14 @@ public class MatchController : ControllerBase
 {
     private readonly MatchingService _matchingService;
     private readonly IConfiguration _configuration;
+    private readonly RecyclableMemoryStreamManager _streamManager;
     private readonly ILogger<MatchController> _logger;
 
-    public MatchController(MatchingService matchingService, IConfiguration configuration, ILogger<MatchController> logger)
+    public MatchController(MatchingService matchingService, IConfiguration configuration, RecyclableMemoryStreamManager streamManager, ILogger<MatchController> logger)
     {
         _matchingService = matchingService;
         _configuration = configuration;
+        _streamManager = streamManager;
         _logger = logger;
     }
 
@@ -26,27 +29,19 @@ public class MatchController : ControllerBase
     public async Task<ActionResult<MatchResponse>> Match(IFormFile photo)
     {
         if (photo is null || photo.Length == 0)
-            return BadRequest(new { error = "请上传照片" });
-
-        byte[] imageBytes;
-        using (var ms = new MemoryStream())
         {
-            await photo.CopyToAsync(ms);
-            imageBytes = ms.ToArray();
+            return BadRequest(new { error = "请上传照片" });
         }
 
         var threshold = _configuration.GetValue<float>("Matching:SimilarityThreshold", 0.6f);
-        _logger.LogInformation("匹配请求: 图片大小={Len} bytes, 阈值={Threshold}", imageBytes.Length, threshold);
+        using var ms = _streamManager.GetStream();
+        await photo.CopyToAsync(ms);
+        ms.Position = 0;
 
-        var result = await _matchingService.MatchAsync(imageBytes, threshold);
-
-        if (result.Detections.Count == 0)
-            return Ok(new MatchResponse
-            {
-                Detections = [],
-                Threshold = threshold,
-            });
-
-        return Ok(result);
+        _logger.LogInformation("匹配请求: 图片大小={Len} bytes, 阈值={Threshold}", ms.Length, threshold);
+        var result = await _matchingService.MatchAsync(ms, threshold);
+        return result.Detections.Count == 0 
+            ? Ok(new MatchResponse { Detections = [], Threshold = threshold }) 
+            : Ok(result);
     }
 }
