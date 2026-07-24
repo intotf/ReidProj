@@ -1,5 +1,8 @@
+using System.Text;
 using Microsoft.Extensions.Configuration;
 using ReIdCli;
+
+Console.OutputEncoding = Encoding.UTF8;
 
 // 加载配置
 var configuration = new ConfigurationBuilder()
