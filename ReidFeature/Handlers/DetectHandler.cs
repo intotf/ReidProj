@@ -1,10 +1,10 @@
 using Microsoft.IO;
-using ReidProj.Models;
-using ReidProj.Services;
+using ReidFeature.Models;
+using ReidFeature.Services;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
-namespace ReidProj.Handlers;
+namespace ReidFeature.Handlers;
 
 public static class DetectHandler
 {

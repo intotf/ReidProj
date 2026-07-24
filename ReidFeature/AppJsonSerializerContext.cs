@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
-using ReidProj.Models;
+using ReidFeature.Models;
 
-namespace ReidProj
+namespace ReidFeature
 {
     [JsonSerializable(typeof(DetectResponse))]
     [JsonSerializable(typeof(PersonDetection[]))]

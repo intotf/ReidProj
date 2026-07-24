@@ -2,7 +2,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
-namespace ReidProj.Services;
+namespace ReidFeature.Services;
 
 public sealed class ImageUtils
 {

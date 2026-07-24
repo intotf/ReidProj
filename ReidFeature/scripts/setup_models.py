@@ -18,7 +18,8 @@ from pathlib import Path
 # ─── 路径配置 ─────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = PROJECT_DIR / "models"
-FASTREID_DIR = PROJECT_DIR / "scripts" / "fast-reid"
+SCRIPTS_DIR = Path(__file__).resolve().parent
+FASTREID_DIR = SCRIPTS_DIR / "fast-reid"
 
 
 def log(msg: str):
@@ -143,23 +144,14 @@ def _do_export_reid(output_path: Path):
     model.eval()
 
     # 下载 Market1501 预训练权重
-    weights_url = (
-        # 使用代理加速下载
-        "https://api.gitproxy.dev/github.com/JDAI-CV/fast-reid/releases/download/v0.1.1/market_bot_R50-ibn.pth"
-    )
-    weights_path = MODELS_DIR / "bagtricks_R50-ibn.pth"
+    weights_path = SCRIPTS_DIR / "bagtricks_R50-ibn.pth"
 
     if not weights_path.exists():
         log("下载 Market1501 预训练权重...")
         import urllib.request
-        try:
-            urllib.request.urlretrieve(weights_url, weights_path)
-        except Exception as e:
-            log(f"代理下载失败: {e}")
-            log("尝试直连下载...")
-            urllib.request.urlretrieve(
-                "https://github.com/JDAI-CV/fast-reid/releases/download/v0.1.1/market_bot_R50-ibn.pth",
-                weights_path)
+        urllib.request.urlretrieve(
+            "https://github.com/JDAI-CV/fast-reid/releases/download/v0.1.1/market_bot_R50-ibn.pth",
+            weights_path)
         log(f"✅ 权重已下载: {weights_path}")
 
     # 加载权重

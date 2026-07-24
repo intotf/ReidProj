@@ -1,4 +1,4 @@
-namespace ReidProj.Models;
+namespace ReidFeature.Models;
 
 /// <summary>
 /// 人物边界框

@@ -1,10 +1,9 @@
-using System.Diagnostics;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
-namespace ReidProj.Services;
+namespace ReidFeature.Services;
 
 /// <summary>
 /// YOLOv11n ONNX 推理 + NMS 后处理，仅过滤人物（class=0）
@@ -34,21 +33,21 @@ public sealed class YoloDetector : IDisposable
         if (!File.Exists(modelPath))
         {
             // 回退到项目目录
-            modelPath = Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory, "models", "yolo11n.onnx");
+            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "yolo11n.onnx");
         }
         if (!File.Exists(modelPath))
         {
-            throw new FileNotFoundException(
-                "请先运行 scripts/setup_models.py 导出 YOLO 模型", modelPath);
+            throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出 YOLO 模型", modelPath);
         }
 
         _logger.LogInformation("加载 YOLO 模型: {Path}", modelPath);
-        var opts = new Microsoft.ML.OnnxRuntime.SessionOptions();
-        opts.GraphOptimizationLevel = Microsoft.ML.OnnxRuntime.GraphOptimizationLevel.ORT_ENABLE_ALL;
-        opts.IntraOpNumThreads = 1;
-        opts.InterOpNumThreads = 1;
-        opts.ExecutionMode = Microsoft.ML.OnnxRuntime.ExecutionMode.ORT_SEQUENTIAL;
+        var opts = new Microsoft.ML.OnnxRuntime.SessionOptions
+        {
+            IntraOpNumThreads = 1,
+            InterOpNumThreads = 1,
+            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
+        };
         _session = new InferenceSession(modelPath, opts);
         _logger.LogInformation("YOLO 模型加载完成, 输入: {Cnt}", _session.InputMetadata.Count);
     }
@@ -68,8 +67,7 @@ public sealed class YoloDetector : IDisposable
         var inputTensor = new DenseTensor<float>(pixelData, [1, 3, InputSize, InputSize]);
 
         // 3. ONNX 推理
-        using var results = _session.Run(
-            [NamedOnnxValue.CreateFromTensor("images", inputTensor)]);
+        using var results = _session.Run([NamedOnnxValue.CreateFromTensor("images", inputTensor)]);
 
         // 4. 解析输出
         // YOLOv11 输出 shape: [1, 84, 8400]
@@ -81,8 +79,6 @@ public sealed class YoloDetector : IDisposable
         int numDetections = outputDims[2]; // 8400
         int numClasses = outputDims[1] - 4; // 80
         int stride = numDetections; // 每个通道的步长（8400）
-
-
 
         // 5. 框解码 + 置信度过滤（使用临时列表）
         var candidates = new List<(float X, float Y, float W, float H, float Score)>(numDetections);
@@ -158,11 +154,13 @@ public sealed class YoloDetector : IDisposable
         return results_list;
     }
 
-    private List<(Rectangle Bbox, float Confidence)> Nms(
-        List<(float X, float Y, float W, float H, float Score)> candidates)
+    private static List<(Rectangle Bbox, float Confidence)> Nms(List<(float X, float Y, float W, float H, float Score)> candidates)
     {
         var selected = new List<(Rectangle Bbox, float Confidence)>();
-        if (candidates.Count == 0) return selected;
+        if (candidates.Count == 0)
+        {
+            return selected;
+        }
 
         // 按置信度降序排序
         candidates.Sort((a, b) => b.Score.CompareTo(a.Score));
@@ -171,11 +169,17 @@ public sealed class YoloDetector : IDisposable
 
         for (int i = 0; i < candidates.Count; i++)
         {
-            if (removed[i]) continue;
+            if (removed[i])
+            {
+                continue;
+            }
 
             var (x1, y1, w1, h1, score) = candidates[i];
             // 跳过无效框（宽度或高度非正数）
-            if (w1 <= 0 || h1 <= 0) continue;
+            if (w1 <= 0 || h1 <= 0)
+            {
+                continue;
+            }
 
             float left1 = Math.Max(0, x1);
             float top1 = Math.Max(0, y1);
@@ -188,10 +192,16 @@ public sealed class YoloDetector : IDisposable
 
             for (int j = i + 1; j < candidates.Count; j++)
             {
-                if (removed[j]) continue;
+                if (removed[j])
+                {
+                    continue;
+                }
 
                 var (x2, y2, w2, h2, _) = candidates[j];
-                if (w2 <= 0 || h2 <= 0) continue;
+                if (w2 <= 0 || h2 <= 0)
+                {
+                    continue;
+                }
 
                 float left2 = Math.Max(0, x2);
                 float top2 = Math.Max(0, y2);
@@ -205,21 +215,25 @@ public sealed class YoloDetector : IDisposable
                 float interBottom = Math.Min(bottom1, bottom2);
 
                 if (interLeft >= interRight || interTop >= interBottom)
+                {
                     continue;
+                }
 
                 float interArea = (interRight - interLeft) * (interBottom - interTop);
                 float area2 = w2 * h2;
                 float iou = interArea / (area1 + area2 - interArea);
 
                 if (iou > NmsThreshold)
+                {
                     removed[j] = true;
+                }
             }
         }
 
         return selected;
     }
 
-   
+
 
     public void Dispose()
     {

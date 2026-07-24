@@ -1,4 +1,4 @@
-namespace ReidProj.Models;
+namespace ReidFeature.Models;
 
 /// <summary>
 /// 检测响应的包装

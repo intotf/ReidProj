@@ -1,8 +1,8 @@
 using Microsoft.IO;
-using ReidProj.Handlers;
-using ReidProj.Services;
+using ReidFeature.Handlers;
+using ReidFeature.Services;
 
-namespace ReidProj
+namespace ReidFeature
 {
     public class Program
     {
@@ -19,7 +19,6 @@ namespace ReidProj
             // ── Kestrel 配置 ──────────────────────────────
             builder.WebHost.ConfigureKestrel(k =>
             {
-                k.ListenAnyIP(9000);
                 k.Limits.MaxRequestBodySize = 20 * 1024 * 1024;
             });
 
