@@ -46,7 +46,7 @@ public static class DetectHandler
 
         using (image)
         {
-            var detections = yolo.Detect(image);
+            var detections = yolo.DetectPersons(image);
             if (detections.Count == 0)
             {
                 return Results.Ok(new DetectResponse([]));

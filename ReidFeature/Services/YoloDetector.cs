@@ -17,9 +17,6 @@ public sealed class YoloDetector : IDisposable
     private readonly ILogger<YoloDetector> _logger;
     private readonly InferenceSession _session;
 
-    // COCO 类别中 person 的 索引
-    private const int PersonClassId = 0;
-
     // 模型输入尺寸
     private const int InputSize = 640;
 
@@ -50,7 +47,7 @@ public sealed class YoloDetector : IDisposable
     /// <summary>
     /// 检测图像中的人物，返回边界框列表
     /// </summary>
-    public List<(Rectangle Bbox, float Confidence)> Detect(Image<Rgb24> image)
+    public List<(Rectangle Bbox, float Confidence)> DetectPersons(Image<Rgb24> image)
     {
         var sw = Stopwatch.StartNew();
 
@@ -70,14 +67,13 @@ public sealed class YoloDetector : IDisposable
 
             // 4. 解析输出
             // YOLOv11 输出 shape: [1, 84, 8400]
-            // 84 = 4(cx,cy,w,h) + 80(COCO class scores)
+            // 84 = 4(cx,cy,w,h) + 80(COCO class scores)，只读取人物(class=0)的分数
             // Detect head 已内嵌 sigmoid(cls) + decode_bboxes(xywh) * strides
             // bbox 四通道为像素坐标 (0-640)，cls 已过 sigmoid
             var outputTensor = (DenseTensor<float>)results[0].AsTensor<float>();
             var outputSpan = outputTensor.Buffer.Span;
             var dims = outputTensor.Dimensions;
             int numDetections = dims[2];
-            int numClasses = dims[1] - 4;
             int stride = numDetections; // 每个通道的步长
 
             // 5. 框解码 + 置信度过滤（使用临时列表）
@@ -90,22 +86,9 @@ public sealed class YoloDetector : IDisposable
 
             for (int i = 0; i < numDetections; i++)
             {
-                float maxScore = 0;
-                int bestClass = -1;
-
-                // 找最高分的类别
-                for (int c = 0; c < numClasses; c++)
-                {
-                    float score = outputSpan[(4 + c) * stride + i];
-                    if (score > maxScore)
-                    {
-                        maxScore = score;
-                        bestClass = c;
-                    }
-                }
-
-                // 只保留人物 + 置信度阈值过滤
-                if (bestClass != PersonClassId || maxScore < ConfidenceThreshold)
+                // 只检查人物类别（class 0）的置信度
+                float score = outputSpan[4 * stride + i];
+                if (score < ConfidenceThreshold)
                     continue;
 
                 // bbox 四通道: cx, cy, w, h（像素坐标，0-640）
@@ -140,7 +123,7 @@ public sealed class YoloDetector : IDisposable
                     y1,
                     boxW,
                     boxH,
-                    maxScore
+                    score
                 ));
             }
 
