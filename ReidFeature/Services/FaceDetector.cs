@@ -1,13 +1,12 @@
+using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using ReidFeature.Models;
 using ReidFeature.Helpers;
+using ReidFeature.Models;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
-using Microsoft.Extensions.Options;
 
 namespace ReidFeature.Services;
 
@@ -71,7 +70,6 @@ public sealed class FaceDetector : IDisposable
             var outputSpan = outputTensor.Buffer.Span;
             var dims = outputTensor.Dimensions;
             int numDetections = dims[2];
-            int numClasses = dims[1] - 4;
             int stride = numDetections;
 
             // 5. 框解码 + 置信度过滤
@@ -83,22 +81,9 @@ public sealed class FaceDetector : IDisposable
 
             for (int i = 0; i < numDetections; i++)
             {
-                float maxScore = 0;
-                int bestClass = -1;
-
-                // 找最高分的类别
-                for (int c = 0; c < numClasses; c++)
-                {
-                    float score = outputSpan[(4 + c) * stride + i];
-                    if (score > maxScore)
-                    {
-                        maxScore = score;
-                        bestClass = c;
-                    }
-                }
-
-                // 置信度阈值过滤
-                if (maxScore < ConfidenceThreshold)
+                // 人脸只有类别 0，直接读取分数
+                float score = outputSpan[4 * stride + i];
+                if (score < ConfidenceThreshold)
                     continue;
 
                 // bbox 四通道: cx, cy, w, h（像素坐标，0-640）
@@ -128,7 +113,7 @@ public sealed class FaceDetector : IDisposable
                 float boxW = Math.Max(0, x2 - x1);
                 float boxH = Math.Max(0, y2 - y1);
 
-                candidates.Add((x1, y1, boxW, boxH, maxScore));
+                candidates.Add((x1, y1, boxW, boxH, score));
             }
 
             // 6. NMS
@@ -146,27 +131,82 @@ public sealed class FaceDetector : IDisposable
     /// <summary>
     /// 检测图像中的最佳人脸，返回映射到原始图像坐标的 FaceDetection
     /// </summary>
-    /// <param name="image">裁剪后的子图像</param>
-    /// <param name="offsetX">子图像在原图中的 X 偏移</param>
-    /// <param name="offsetY">子图像在原图中的 Y 偏移</param>
-    /// <returns>最佳人脸检测结果，无人脸时返回 null</returns>
     public FaceDetection? DetectBestFace(Image<Rgb24> image, int offsetX, int offsetY)
     {
-        var faces = Detect(image);
-        if (faces.Count == 0)
-            return null;
+        var sw = Stopwatch.StartNew();
 
-        // NMS 结果已按置信度降序排列，首条即为最佳
-        var best = faces[0];
-        return new FaceDetection(
-            new BoundingBox(
-                offsetX + best.Bbox.X,
-                offsetY + best.Bbox.Y,
-                best.Bbox.Width,
-                best.Bbox.Height
-            ),
-            best.Confidence
-        );
+        // 1. Letterbox resize
+        using var resized = ImageProcessor.LetterboxResize(image, InputSize);
+
+        // 2. 构建 CHW tensor
+        int bufferSize = 3 * InputSize * InputSize;
+        float[] pixelData = ArrayPool<float>.Shared.Rent(bufferSize);
+        try
+        {
+            ImageProcessor.NormalizeToTensor(resized, pixelData);
+            var inputTensor = new DenseTensor<float>(pixelData.AsMemory(0, bufferSize), [1, 3, InputSize, InputSize]);
+
+            // 3. ONNX 推理
+            using var results = _session.Run([NamedOnnxValue.CreateFromTensor("images", inputTensor)]);
+
+            // 4. 在原始输出中找最高分人脸（跳过 NMS）
+            var outputTensor = (DenseTensor<float>)results[0].AsTensor<float>();
+            var outputSpan = outputTensor.Buffer.Span;
+            int numDetections = outputTensor.Dimensions[2];
+            int stride = numDetections;
+
+            float scale = Math.Min((float)InputSize / image.Width, (float)InputSize / image.Height);
+            float padX = (InputSize - (int)(image.Width * scale)) / 2f;
+            float padY = (InputSize - (int)(image.Height * scale)) / 2f;
+
+            float bestScore = 0;
+            float bestX = 0, bestY = 0, bestW = 0, bestH = 0;
+
+            for (int i = 0; i < numDetections; i++)
+            {
+                float score = outputSpan[4 * stride + i];
+                if (score <= bestScore)
+                    continue;
+
+                // 反 letterbox + clamp 只对当前候选框做
+                float cx = outputSpan[0 * stride + i];
+                float cy = outputSpan[1 * stride + i];
+                float bw = outputSpan[2 * stride + i];
+                float bh = outputSpan[3 * stride + i];
+
+                float x1 = Math.Clamp((cx - bw / 2f - padX) / scale, 0f, image.Width);
+                float y1 = Math.Clamp((cy - bh / 2f - padY) / scale, 0f, image.Height);
+                float x2 = Math.Clamp((cx + bw / 2f - padX) / scale, 0f, image.Width);
+                float y2 = Math.Clamp((cy + bh / 2f - padY) / scale, 0f, image.Height);
+
+                bestScore = score;
+                bestX = x1;
+                bestY = y1;
+                bestW = Math.Max(0, x2 - x1);
+                bestH = Math.Max(0, y2 - y1);
+            }
+
+            if (bestScore < ConfidenceThreshold)
+            {
+                Log.BestFaceNotFound(_logger, sw.Elapsed.TotalMilliseconds);
+                return null;
+            }
+
+            Log.BestFaceDetected(_logger, bestScore, sw.Elapsed.TotalMilliseconds);
+            return new FaceDetection(
+                new BoundingBox(
+                    offsetX + (int)bestX,
+                    offsetY + (int)bestY,
+                    (int)bestW,
+                    (int)bestH
+                ),
+                bestScore
+            );
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(pixelData);
+        }
     }
 
     private static List<(Rectangle Bbox, float Confidence)> Nms(List<(float X, float Y, float W, float H, float Score)> candidates)

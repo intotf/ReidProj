@@ -15,8 +15,8 @@ static partial class Log
     [LoggerMessage(EventId = 2, Level = LogLevel.Warning, Message = "图片解码失败")]
     public static partial void ImageDecodeFailed(ILogger logger, Exception exception);
 
-    [LoggerMessage(EventId = 4, Level = LogLevel.Information, Message = "检测完成: {Cnt} 个人物")]
-    public static partial void DetectionCompleted(ILogger logger, int cnt);
+    [LoggerMessage(EventId = 4, Level = LogLevel.Information, Message = "检测完成: {Cnt} 个人物, 耗时 {Elapsed:F1}ms")]
+    public static partial void DetectionCompleted(ILogger logger, int cnt, double elapsed);
 
     // ===== ReIdExtractor =====
     [LoggerMessage(EventId = 10, Level = LogLevel.Information, Message = "加载 ReID 模型: {Path}")]
@@ -47,4 +47,10 @@ static partial class Log
 
     [LoggerMessage(EventId = 32, Level = LogLevel.Information, Message = "人脸检测: {Cnt} 个, 耗时 {Elapsed:F1}ms")]
     public static partial void FaceDetectionCompleted(ILogger logger, int cnt, double elapsed);
+
+    [LoggerMessage(EventId = 33, Level = LogLevel.Information, Message = "最佳人脸: score={Score:F3}, 耗时 {Elapsed:F1}ms")]
+    public static partial void BestFaceDetected(ILogger logger, float score, double elapsed);
+
+    [LoggerMessage(EventId = 34, Level = LogLevel.Debug, Message = "未检测到最佳人脸, 耗时 {Elapsed:F1}ms")]
+    public static partial void BestFaceNotFound(ILogger logger, double elapsed);
 }

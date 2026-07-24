@@ -5,6 +5,7 @@ using ReidFeature.Services;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using System.Diagnostics;
 
 namespace ReidFeature.Handlers;
 
@@ -30,6 +31,7 @@ public static class DetectHandler
 
         Log.ImageRequestReceived(logger, ms.Length);
 
+        var sw = Stopwatch.StartNew();
         Image<Rgb24> image;
         try
         {
@@ -79,7 +81,7 @@ public static class DetectHandler
                 );
             }
 
-            Log.DetectionCompleted(logger, persons.Length);
+            Log.DetectionCompleted(logger, persons.Length, sw.Elapsed.TotalMilliseconds);
             return Results.Ok(new DetectResponse(persons));
         }
     }
