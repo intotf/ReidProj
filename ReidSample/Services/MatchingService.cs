@@ -1,7 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using ReIdSample.Data;
-using ReIdSample.Models;
 using ReIdSample.Models.Dtos;
+using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 
 namespace ReIdSample.Services;
 
@@ -41,12 +42,12 @@ public class MatchingService
         var results = new List<DetectionResult>();
         foreach (var det in detections)
         {
-            var queryFeatures = BytesToFloats(det.Features);
+            var queryFeatures = CastToFloats(det.Features);
             var matches = new List<PersonMatch>();
 
             foreach (var photo in registeredPhotos)
             {
-                var registeredFeatures = BytesToFloats(photo.FeatureVector);
+                var registeredFeatures = CastToFloats(photo.FeatureVector);
                 var similarity = CosineSimilarity(queryFeatures, registeredFeatures);
 
                 matches.Add(new PersonMatch
@@ -89,30 +90,25 @@ public class MatchingService
     /// <summary>
     /// 将 byte[] 还原为 float[]（4 字节一组）
     /// </summary>
-    private static float[] BytesToFloats(byte[] bytes)
+    private static ReadOnlySpan<float> CastToFloats(ReadOnlySpan<byte> bytes)
     {
-        var floats = new float[bytes.Length / 4];
-        Buffer.BlockCopy(bytes, 0, floats, 0, bytes.Length);
-        return floats;
+        return MemoryMarshal.Cast<byte, float>(bytes);
     }
 
     /// <summary>
-    /// 计算余弦相似度
+    /// 计算余弦相似度（TensorPrimitives SIMD 加速）
     /// </summary>
-    public static float CosineSimilarity(float[] vectorA, float[] vectorB)
+    public static float CosineSimilarity(ReadOnlySpan<float> vectorA, ReadOnlySpan<float> vectorB)
     {
         if (vectorA.Length != vectorB.Length)
-            throw new ArgumentException("特征向量维度不匹配");
-
-        double dotProduct = 0, normA = 0, normB = 0;
-        for (int i = 0; i < vectorA.Length; i++)
         {
-            dotProduct += vectorA[i] * vectorB[i];
-            normA += vectorA[i] * vectorA[i];
-            normB += vectorB[i] * vectorB[i];
+            throw new ArgumentException("特征向量维度不匹配");
         }
 
-        if (normA == 0 || normB == 0) return 0;
-        return (float)(dotProduct / (Math.Sqrt(normA) * Math.Sqrt(normB)));
+        var dot = TensorPrimitives.Dot(vectorA, vectorB);
+        var normA = TensorPrimitives.Norm(vectorA);
+        var normB = TensorPrimitives.Norm(vectorB);
+
+        return normA == 0 || normB == 0 ? 0 : dot / (normA * normB);
     }
 }

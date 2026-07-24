@@ -11,4 +11,8 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.Numerics.Tensors" Version="10.0.10" />
+  </ItemGroup>
+
 </Project>
