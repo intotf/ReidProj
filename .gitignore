@@ -364,3 +364,6 @@ FodyWeavers.xsd
 *.pt
 *.onnx
 *.pth
+/ReidSample/reid_sample.db
+/ReidSample/reid_sample.db-shm
+/ReidSample/reid_sample.db-wal
