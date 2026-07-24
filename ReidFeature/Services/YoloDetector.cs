@@ -3,7 +3,9 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using System.Buffers;
 using System.Diagnostics;
+using ReidFeature.Helpers;
 
 namespace ReidFeature.Services;
 
@@ -24,9 +26,6 @@ public sealed class YoloDetector : IDisposable
     // NMS 参数
     private const float NmsThreshold = 0.3f;
     private const float ConfidenceThreshold = 0.35f;
-
-    private static readonly float[] Mean = [0.485f, 0.456f, 0.406f];
-    private static readonly float[] Std = [0.229f, 0.224f, 0.225f];
 
     public YoloDetector(ILogger<YoloDetector> logger)
     {
@@ -63,95 +62,104 @@ public sealed class YoloDetector : IDisposable
         var sw = Stopwatch.StartNew();
 
         // 1. Letterbox resize
-        using var resized = LetterboxResize(image, InputSize);
+        using var resized = ImageProcessingHelper.LetterboxResize(image, InputSize);
 
         // 2. 构建 CHW tensor (3×640×640)
-        var pixelData = NormalizeToTensor(resized);
-        var inputTensor = new DenseTensor<float>(pixelData, [1, 3, InputSize, InputSize]);
-
-        // 3. ONNX 推理
-        using var results = _session.Run([NamedOnnxValue.CreateFromTensor("images", inputTensor)]);
-
-        // 4. 解析输出
-        // YOLOv11 输出 shape: [1, 84, 8400]
-        // 84 = 4(cx,cy,w,h) + 80(COCO class scores)
-        // Detect head 已内嵌 sigmoid(cls) + decode_bboxes(xywh) * strides
-        // bbox 四通道为像素坐标 (0-640)，cls 已过 sigmoid
-        var outputData = results[0].AsTensor<float>().ToArray();
-        var outputDims = results[0].AsTensor<float>().Dimensions;
-        int numDetections = outputDims[2]; // 8400
-        int numClasses = outputDims[1] - 4; // 80
-        int stride = numDetections; // 每个通道的步长（8400）
-
-        // 5. 框解码 + 置信度过滤（使用临时列表）
-        var candidates = new List<(float X, float Y, float W, float H, float Score)>(numDetections);
-
-        // letterbox 参数必须与 LetterboxResize 保持一致
-        float scale = Math.Min((float)InputSize / image.Width, (float)InputSize / image.Height);
-        float padX = (InputSize - (int)(image.Width * scale)) / 2f;
-        float padY = (InputSize - (int)(image.Height * scale)) / 2f;
-
-        for (int i = 0; i < numDetections; i++)
+        int bufferSize = 3 * InputSize * InputSize;
+        float[] pixelData = ArrayPool<float>.Shared.Rent(bufferSize);
+        try
         {
-            float maxScore = 0;
-            int bestClass = -1;
+            ImageProcessingHelper.NormalizeToTensor(resized, pixelData);
+            var inputTensor = new DenseTensor<float>(pixelData.AsMemory(0, bufferSize), [1, 3, InputSize, InputSize]);
 
-            // 找最高分的类别
-            for (int c = 0; c < numClasses; c++)
+            // 3. ONNX 推理
+            using var results = _session.Run([NamedOnnxValue.CreateFromTensor("images", inputTensor)]);
+
+            // 4. 解析输出
+            // YOLOv11 输出 shape: [1, 84, 8400]
+            // 84 = 4(cx,cy,w,h) + 80(COCO class scores)
+            // Detect head 已内嵌 sigmoid(cls) + decode_bboxes(xywh) * strides
+            // bbox 四通道为像素坐标 (0-640)，cls 已过 sigmoid
+            var outputData = results[0].AsTensor<float>().ToArray();
+            var outputDims = results[0].AsTensor<float>().Dimensions;
+            int numDetections = outputDims[2]; // 8400
+            int numClasses = outputDims[1] - 4; // 80
+            int stride = numDetections; // 每个通道的步长（8400）
+
+            // 5. 框解码 + 置信度过滤（使用临时列表）
+            var candidates = new List<(float X, float Y, float W, float H, float Score)>(numDetections);
+
+            // letterbox 参数必须与 LetterboxResize 保持一致
+            float scale = Math.Min((float)InputSize / image.Width, (float)InputSize / image.Height);
+            float padX = (InputSize - (int)(image.Width * scale)) / 2f;
+            float padY = (InputSize - (int)(image.Height * scale)) / 2f;
+
+            for (int i = 0; i < numDetections; i++)
             {
-                float score = outputData[(4 + c) * stride + i];
-                if (score > maxScore)
+                float maxScore = 0;
+                int bestClass = -1;
+
+                // 找最高分的类别
+                for (int c = 0; c < numClasses; c++)
                 {
-                    maxScore = score;
-                    bestClass = c;
+                    float score = outputData[(4 + c) * stride + i];
+                    if (score > maxScore)
+                    {
+                        maxScore = score;
+                        bestClass = c;
+                    }
                 }
+
+                // 只保留人物 + 置信度阈值过滤
+                if (bestClass != PersonClassId || maxScore < ConfidenceThreshold)
+                    continue;
+
+                // bbox 四通道: cx, cy, w, h（像素坐标，0-640）
+                float cx = outputData[0 * stride + i];
+                float cy = outputData[1 * stride + i];
+                float bw = outputData[2 * stride + i];
+                float bh = outputData[3 * stride + i];
+
+                // cx,cy,w,h → x1,y1,x2,y2（仍在 letterbox 空间）
+                float x1_lb = cx - bw / 2f;
+                float y1_lb = cy - bh / 2f;
+                float x2_lb = cx + bw / 2f;
+                float y2_lb = cy + bh / 2f;
+
+                // 反 letterbox 映射回原图坐标
+                float x1 = (x1_lb - padX) / scale;
+                float y1 = (y1_lb - padY) / scale;
+                float x2 = (x2_lb - padX) / scale;
+                float y2 = (y2_lb - padY) / scale;
+
+                // Clamp 到原图范围内
+                x1 = Math.Clamp(x1, 0f, image.Width);
+                y1 = Math.Clamp(y1, 0f, image.Height);
+                x2 = Math.Clamp(x2, 0f, image.Width);
+                y2 = Math.Clamp(y2, 0f, image.Height);
+
+                float boxW = Math.Max(0, x2 - x1);
+                float boxH = Math.Max(0, y2 - y1);
+
+                candidates.Add((
+                    x1,
+                    y1,
+                    boxW,
+                    boxH,
+                    maxScore
+                ));
             }
 
-            // 只保留人物 + 置信度阈值过滤
-            if (bestClass != PersonClassId || maxScore < ConfidenceThreshold)
-                continue;
+            // 6. NMS
+            var resultsList = Nms(candidates);
 
-            // bbox 四通道: cx, cy, w, h（像素坐标，0-640）
-            float cx = outputData[0 * stride + i];
-            float cy = outputData[1 * stride + i];
-            float bw = outputData[2 * stride + i];
-            float bh = outputData[3 * stride + i];
-
-            // cx,cy,w,h → x1,y1,x2,y2（仍在 letterbox 空间）
-            float x1_lb = cx - bw / 2f;
-            float y1_lb = cy - bh / 2f;
-            float x2_lb = cx + bw / 2f;
-            float y2_lb = cy + bh / 2f;
-
-            // 反 letterbox 映射回原图坐标
-            float x1 = (x1_lb - padX) / scale;
-            float y1 = (y1_lb - padY) / scale;
-            float x2 = (x2_lb - padX) / scale;
-            float y2 = (y2_lb - padY) / scale;
-
-            // Clamp 到原图范围内
-            x1 = Math.Clamp(x1, 0f, image.Width);
-            y1 = Math.Clamp(y1, 0f, image.Height);
-            x2 = Math.Clamp(x2, 0f, image.Width);
-            y2 = Math.Clamp(y2, 0f, image.Height);
-
-            float boxW = Math.Max(0, x2 - x1);
-            float boxH = Math.Max(0, y2 - y1);
-
-            candidates.Add((
-                x1,
-                y1,
-                boxW,
-                boxH,
-                maxScore
-            ));
+            _logger.LogInformation("YOLO 检测: {Cnt} 人, 耗时 {Elapsed:F1}ms", resultsList.Count, sw.Elapsed.TotalMilliseconds);
+            return resultsList;
         }
-
-        // 6. NMS
-        var resultsList = Nms(candidates);
-
-        _logger.LogInformation("YOLO 检测: {Cnt} 人, 耗时 {Elapsed:F1}ms", resultsList.Count, sw.Elapsed.TotalMilliseconds);
-        return resultsList;
+        finally
+        {
+            ArrayPool<float>.Shared.Return(pixelData);
+        }
     }
 
     private static List<(Rectangle Bbox, float Confidence)> Nms(List<(float X, float Y, float W, float H, float Score)> candidates)
@@ -217,45 +225,6 @@ public sealed class YoloDetector : IDisposable
         }
 
         return selected;
-    }
-
-    private static Image<Rgb24> LetterboxResize(Image<Rgb24> src, int targetSize)
-    {
-        float scale = Math.Min((float)targetSize / src.Width, (float)targetSize / src.Height);
-        int newW = (int)(src.Width * scale);
-        int newH = (int)(src.Height * scale);
-
-        using var resized = src.Clone(ctx => ctx.Resize(newW, newH, KnownResamplers.Bicubic));
-        var canvas = new Image<Rgb24>(targetSize, targetSize, new Rgb24(114, 114, 114));
-        int offsetX = (targetSize - newW) / 2;
-        int offsetY = (targetSize - newH) / 2;
-
-        canvas.Mutate(ctx => ctx.DrawImage(resized, new Point(offsetX, offsetY), 1f));
-        return canvas;
-    }
-
-    private static float[] NormalizeToTensor(Image<Rgb24> image)
-    {
-        int h = image.Height, w = image.Width;
-        var result = new float[3 * h * w];
-
-        image.ProcessPixelRows(accessor =>
-        {
-            for (int y = 0; y < h; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < w; x++)
-                {
-                    var p = row[x];
-                    int idx = y * w + x;
-                    result[idx] = (p.R / 255f - Mean[0]) / Std[0];
-                    result[h * w + idx] = (p.G / 255f - Mean[1]) / Std[1];
-                    result[2 * h * w + idx] = (p.B / 255f - Mean[2]) / Std[2];
-                }
-            }
-        });
-
-        return result;
     }
 
     public void Dispose()
