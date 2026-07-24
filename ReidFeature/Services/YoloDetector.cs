@@ -1,11 +1,10 @@
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using ReidFeature.Helpers;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
-using ReidFeature.Helpers;
 
 namespace ReidFeature.Services;
 
@@ -80,11 +79,12 @@ public sealed class YoloDetector : IDisposable
             // 84 = 4(cx,cy,w,h) + 80(COCO class scores)
             // Detect head 已内嵌 sigmoid(cls) + decode_bboxes(xywh) * strides
             // bbox 四通道为像素坐标 (0-640)，cls 已过 sigmoid
-            var outputData = results[0].AsTensor<float>().ToArray();
-            var outputDims = results[0].AsTensor<float>().Dimensions;
-            int numDetections = outputDims[2]; // 8400
-            int numClasses = outputDims[1] - 4; // 80
-            int stride = numDetections; // 每个通道的步长（8400）
+            var outputTensor = (DenseTensor<float>)results[0].AsTensor<float>();
+            var outputSpan = outputTensor.Buffer.Span;
+            var dims = outputTensor.Dimensions;
+            int numDetections = dims[2];
+            int numClasses = dims[1] - 4;
+            int stride = numDetections; // 每个通道的步长
 
             // 5. 框解码 + 置信度过滤（使用临时列表）
             var candidates = new List<(float X, float Y, float W, float H, float Score)>(numDetections);
@@ -102,7 +102,7 @@ public sealed class YoloDetector : IDisposable
                 // 找最高分的类别
                 for (int c = 0; c < numClasses; c++)
                 {
-                    float score = outputData[(4 + c) * stride + i];
+                    float score = outputSpan[(4 + c) * stride + i];
                     if (score > maxScore)
                     {
                         maxScore = score;
@@ -115,10 +115,10 @@ public sealed class YoloDetector : IDisposable
                     continue;
 
                 // bbox 四通道: cx, cy, w, h（像素坐标，0-640）
-                float cx = outputData[0 * stride + i];
-                float cy = outputData[1 * stride + i];
-                float bw = outputData[2 * stride + i];
-                float bh = outputData[3 * stride + i];
+                float cx = outputSpan[0 * stride + i];
+                float cy = outputSpan[1 * stride + i];
+                float bw = outputSpan[2 * stride + i];
+                float bh = outputSpan[3 * stride + i];
 
                 // cx,cy,w,h → x1,y1,x2,y2（仍在 letterbox 空间）
                 float x1_lb = cx - bw / 2f;
@@ -171,9 +171,10 @@ public sealed class YoloDetector : IDisposable
         // 按置信度降序排序
         candidates.Sort((a, b) => b.Score.CompareTo(a.Score));
 
-        var removed = new bool[candidates.Count];
+        int count = candidates.Count;
+        var removed = new bool[count];
 
-        for (int i = 0; i < candidates.Count; i++)
+        for (int i = 0; i < count; i++)
         {
             if (removed[i])
                 continue;
@@ -192,7 +193,7 @@ public sealed class YoloDetector : IDisposable
             selected.Add((new Rectangle(
                 (int)left1, (int)top1, (int)(right1 - left1), (int)(bottom1 - top1)), score));
 
-            for (int j = i + 1; j < candidates.Count; j++)
+            for (int j = i + 1; j < count; j++)
             {
                 if (removed[j])
                     continue;

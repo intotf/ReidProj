@@ -73,8 +73,9 @@ public sealed class FaceDetector : IDisposable
             using var results = _session.Run([NamedOnnxValue.CreateFromTensor("images", inputTensor)]);
 
             // 4. 解析输出
-            var outputData = results[0].AsTensor<float>().ToArray();
-            var dims = results[0].AsTensor<float>().Dimensions;
+            var outputTensor = (DenseTensor<float>)results[0].AsTensor<float>();
+            var outputSpan = outputTensor.Buffer.Span;
+            var dims = outputTensor.Dimensions;
             int numDetections = dims[2];
             int numClasses = dims[1] - 4;
             int stride = numDetections;
@@ -94,7 +95,7 @@ public sealed class FaceDetector : IDisposable
                 // 找最高分的类别
                 for (int c = 0; c < numClasses; c++)
                 {
-                    float score = outputData[(4 + c) * stride + i];
+                    float score = outputSpan[(4 + c) * stride + i];
                     if (score > maxScore)
                     {
                         maxScore = score;
@@ -107,10 +108,10 @@ public sealed class FaceDetector : IDisposable
                     continue;
 
                 // bbox 四通道: cx, cy, w, h（像素坐标，0-640）
-                float cx = outputData[0 * stride + i];
-                float cy = outputData[1 * stride + i];
-                float bw = outputData[2 * stride + i];
-                float bh = outputData[3 * stride + i];
+                float cx = outputSpan[0 * stride + i];
+                float cy = outputSpan[1 * stride + i];
+                float bw = outputSpan[2 * stride + i];
+                float bh = outputSpan[3 * stride + i];
 
                 // cx,cy,w,h → x1,y1,x2,y2（仍在 letterbox 空间）
                 float x1_lb = cx - bw / 2f;
@@ -183,9 +184,10 @@ public sealed class FaceDetector : IDisposable
         // 按置信度降序排序
         candidates.Sort((a, b) => b.Score.CompareTo(a.Score));
 
-        var removed = new bool[candidates.Count];
+        int count = candidates.Count;
+        var removed = new bool[count];
 
-        for (int i = 0; i < candidates.Count; i++)
+        for (int i = 0; i < count; i++)
         {
             if (removed[i])
                 continue;
@@ -203,7 +205,7 @@ public sealed class FaceDetector : IDisposable
             selected.Add((new Rectangle(
                 (int)left1, (int)top1, (int)(right1 - left1), (int)(bottom1 - top1)), score));
 
-            for (int j = i + 1; j < candidates.Count; j++)
+            for (int j = i + 1; j < count; j++)
             {
                 if (removed[j])
                     continue;
