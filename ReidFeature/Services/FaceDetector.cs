@@ -7,6 +7,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
+using Microsoft.Extensions.Options;
 
 namespace ReidFeature.Services;
 
@@ -25,7 +26,7 @@ public sealed class FaceDetector : IDisposable
     private const float NmsThreshold = 0.4f;
     private const float ConfidenceThreshold = 0.5f;
 
-    public FaceDetector(ILogger<FaceDetector> logger)
+    public FaceDetector(ILogger<FaceDetector> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
 
@@ -40,14 +41,7 @@ public sealed class FaceDetector : IDisposable
         }
 
         Log.LoadingFaceModel(_logger, modelPath);
-        var opts = new Microsoft.ML.OnnxRuntime.SessionOptions
-        {
-            IntraOpNumThreads = 1,
-            InterOpNumThreads = 1,
-            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
-        };
-        _session = new InferenceSession(modelPath, opts);
+        _session = new InferenceSession(modelPath, onnxOptions.Value.Face);
         Log.FaceModelLoaded(_logger);
     }
 

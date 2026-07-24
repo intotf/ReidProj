@@ -10,6 +10,10 @@ namespace ReidFeature
         {
             var builder = WebApplication.CreateSlimBuilder(args);
 
+            // ── ONNX Runtime 配置 ─────────────────────────
+            builder.Services.Configure<OnnxSessionOptions>(
+                builder.Configuration.GetSection("Onnx"));
+
             // ── JSON 序列化 ──────────────────────────────
             builder.Services.ConfigureHttpJsonOptions(options =>
             {

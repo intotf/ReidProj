@@ -7,6 +7,7 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using ReidFeature.Helpers;
+using Microsoft.Extensions.Options;
 
 namespace ReidFeature.Services;
 
@@ -21,7 +22,7 @@ public sealed class ReIdExtractor : IDisposable
     private const int InputHeight = 256;
     private const int InputWidth = 128;
 
-    public ReIdExtractor(ILogger<ReIdExtractor> logger)
+    public ReIdExtractor(ILogger<ReIdExtractor> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
 
@@ -37,14 +38,7 @@ public sealed class ReIdExtractor : IDisposable
         }
 
         Log.LoadingReIdModel(_logger, modelPath);
-        var opts = new Microsoft.ML.OnnxRuntime.SessionOptions
-        {
-            IntraOpNumThreads = 1,
-            InterOpNumThreads = 1,
-            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
-        };
-        _session = new InferenceSession(modelPath, opts);
+        _session = new InferenceSession(modelPath, onnxOptions.Value.ReId);
         Log.ReIdModelLoaded(_logger);
     }
 

@@ -5,6 +5,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Buffers;
 using System.Diagnostics;
+using Microsoft.Extensions.Options;
 
 namespace ReidFeature.Services;
 
@@ -26,7 +27,7 @@ public sealed class YoloDetector : IDisposable
     private const float NmsThreshold = 0.3f;
     private const float ConfidenceThreshold = 0.35f;
 
-    public YoloDetector(ILogger<YoloDetector> logger)
+    public YoloDetector(ILogger<YoloDetector> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
 
@@ -42,14 +43,7 @@ public sealed class YoloDetector : IDisposable
         }
 
         Log.LoadingYoloModel(_logger, modelPath);
-        var opts = new Microsoft.ML.OnnxRuntime.SessionOptions
-        {
-            IntraOpNumThreads = 1,
-            InterOpNumThreads = 1,
-            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
-        };
-        _session = new InferenceSession(modelPath, opts);
+        _session = new InferenceSession(modelPath, onnxOptions.Value.Yolo);
         Log.YoloModelLoaded(_logger, _session.InputMetadata.Count);
     }
 
