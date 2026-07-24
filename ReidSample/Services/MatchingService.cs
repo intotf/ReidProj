@@ -19,10 +19,10 @@ public class MatchingService
         _logger = logger;
     }
 
-    public async Task<MatchResponse> MatchAsync(byte[] imageBytes, float threshold, CancellationToken ct = default)
+    public async Task<MatchResponse> MatchAsync(Stream imageStream, float threshold, CancellationToken ct = default)
     {
         // 1. 调用 ReidFeature 检测人物 + 提取特征
-        var detections = await _reidClient.DetectAsync(imageBytes, ct);
+        var detections = await _reidClient.DetectAsync(imageStream, ct);
 
         if (detections.Count == 0)
         {

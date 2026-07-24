@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IO;
 using ReIdSample.Data;
 using ReIdSample.Models;
 using ReIdSample.Models.Dtos;
@@ -13,12 +14,14 @@ public class FamilyMembersController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly ReidFeatureClient _reidClient;
+    private readonly RecyclableMemoryStreamManager _streamManager;
     private readonly ILogger<FamilyMembersController> _logger;
 
-    public FamilyMembersController(AppDbContext db, ReidFeatureClient reidClient, ILogger<FamilyMembersController> logger)
+    public FamilyMembersController(AppDbContext db, ReidFeatureClient reidClient, RecyclableMemoryStreamManager streamManager, ILogger<FamilyMembersController> logger)
     {
         _db = db;
         _reidClient = reidClient;
+        _streamManager = streamManager;
         _logger = logger;
     }
 
@@ -87,14 +90,14 @@ public class FamilyMembersController : ControllerBase
             return BadRequest(new { error = "请上传注册照片" });
 
         // 1. 读取照片 bytes → 调用 ReidFeature 提取特征
-        byte[] imageBytes;
-        using (var ms = new MemoryStream())
+        List<ReidPersonDetection> detections;
+        using (var ms = _streamManager.GetStream())
         {
             await request.Photo.CopyToAsync(ms);
-            imageBytes = ms.ToArray();
+            ms.Position = 0;
+            detections = await _reidClient.DetectAsync(ms);
         }
 
-        var detections = await _reidClient.DetectAsync(imageBytes);
 
         if (detections.Count == 0)
             return BadRequest(new { error = "照片中未检测到人物" });
@@ -170,17 +173,19 @@ public class FamilyMembersController : ControllerBase
             return NotFound(new { error = "家庭成员不存在" });
 
         // 1. 读取照片 bytes → 调用 ReidFeature 提取特征
-        byte[] imageBytes;
-        using (var ms = new MemoryStream())
+        List<ReidPersonDetection> detections;
+        using (var ms = _streamManager.GetStream())
         {
             await photo.CopyToAsync(ms);
-            imageBytes = ms.ToArray();
+            ms.Position = 0;
+            detections = await _reidClient.DetectAsync(ms);
         }
 
-        var detections = await _reidClient.DetectAsync(imageBytes);
 
         if (detections.Count == 0)
+        {
             return BadRequest(new { error = "照片中未检测到人物" });
+        }
 
         // 2. 为每个检测到的人物创建照片记录
         var createdPhotos = new List<PhotoResponse>();

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IO;
 using ReIdSample.Data;
 using ReIdSample.Services;
 
@@ -21,6 +22,9 @@ namespace ReIdSample
                     ?? "http://localhost:5000");
                 client.Timeout = TimeSpan.FromSeconds(30);
             });
+
+            // ── 可复用内存流 ────────────────────────────
+            builder.Services.AddSingleton(new RecyclableMemoryStreamManager());
 
             // ── 业务服务 ──────────────────────────────────
             builder.Services.AddScoped<MatchingService>();
