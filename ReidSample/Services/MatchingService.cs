@@ -42,13 +42,10 @@ public class MatchingService
         var results = new List<DetectionResult>();
         foreach (var det in detections)
         {
-            var queryFeatures = CastToFloats(det.Features);
             var matches = new List<PersonMatch>();
-
             foreach (var photo in registeredPhotos)
             {
-                var registeredFeatures = CastToFloats(photo.FeatureVector);
-                var similarity = CosineSimilarity(queryFeatures, registeredFeatures);
+                var similarity = CosineSimilarity(det.Features, photo.FeatureVector);
 
                 matches.Add(new PersonMatch
                 {
@@ -88,11 +85,13 @@ public class MatchingService
     }
 
     /// <summary>
-    /// 将 byte[] 还原为 float[]（4 字节一组）
+    /// 计算余弦相似度（TensorPrimitives SIMD 加速）
     /// </summary>
-    private static ReadOnlySpan<float> CastToFloats(ReadOnlySpan<byte> bytes)
+    public static float CosineSimilarity(ReadOnlySpan<byte> featureA, ReadOnlySpan<byte> featureB)
     {
-        return MemoryMarshal.Cast<byte, float>(bytes);
+        var vectorA = MemoryMarshal.Cast<byte, float>(featureA);
+        var vectorB = MemoryMarshal.Cast<byte, float>(featureB);
+        return CosineSimilarity(vectorA, vectorB);
     }
 
     /// <summary>
