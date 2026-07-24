@@ -16,6 +16,7 @@ public static class DetectHandler
         YoloDetector yolo,
         ReIdExtractor reid,
         FaceDetector faceDetector,
+        DetectionFlags? flags,
         ILogger<Program> logger)
     {
         using var ms = streamManager.GetStream("detect");
@@ -63,8 +64,12 @@ public static class DetectHandler
                 // ReID 特征提取
                 var features = reid.ExtractFeatures(cropped);
 
-                // 人脸检测（坐标自动映射回原图）
-                var face = faceDetector.DetectBestFace(cropped, box.X, box.Y);
+                // 人脸检测（坐标自动映射回原图，可通过 ?flags=SkipFaceDetection 跳过）
+                FaceDetection? face = null;
+                if (flags?.HasFlag(DetectionFlags.SkipFaceDetection) != true)
+                {
+                    face = faceDetector.DetectBestFace(cropped, box.X, box.Y);
+                }
 
                 persons[i] = new PersonDetection(
                     Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),
