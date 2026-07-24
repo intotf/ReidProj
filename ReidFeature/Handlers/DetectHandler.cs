@@ -72,29 +72,8 @@ public static class DetectHandler
                 // ReID 特征提取
                 byte[] features = reid.ExtractFeatures(cropped);
 
-                // 人脸检测（在裁剪图上，坐标映射回原图）
-                FaceDetection? face = null;
-                try
-                {
-                    var faces = faceDetector.Detect(cropped);
-                    if (faces.Count > 0)
-                    {
-                        var best = faces[0]; // 取置信度最高的人脸
-                        face = new FaceDetection(
-                            new BoundingBox(
-                                box.X + best.Bbox.X,
-                                box.Y + best.Bbox.Y,
-                                best.Bbox.Width,
-                                best.Bbox.Height
-                            ),
-                            best.Confidence
-                        );
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "人脸检测失败, 人物 #{Idx}", i);
-                }
+                // 人脸检测（坐标自动映射回原图）
+                FaceDetection? face = faceDetector.DetectBestFace(cropped, box.X, box.Y);
 
                 persons[i] = new PersonDetection(
                     Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),

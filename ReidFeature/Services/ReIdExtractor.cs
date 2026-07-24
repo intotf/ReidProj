@@ -86,7 +86,7 @@ public sealed class ReIdExtractor : IDisposable
             // 3. ONNX 推理
             using var results = _session.Run([NamedOnnxValue.CreateFromTensor("input", inputTensor)]);
 
-            // 4. 输出解析 — 特征向量（直接引用 DenseTensor 底层 Buffer，避免 ToArray 拷贝）
+            // 4. 输出解析 — 特征向量（通过 DenseTensor.Buffer 直接零拷贝输出）
             var resultTensor = (DenseTensor<float>)results[0].AsTensor<float>();
 
             _logger.LogInformation("ReID 特征: dim={Dim}, 耗时 {Elapsed:F1}ms", resultTensor.Length, sw.Elapsed.TotalMilliseconds);
@@ -97,7 +97,6 @@ public sealed class ReIdExtractor : IDisposable
             ArrayPool<float>.Shared.Return(pixelBuffer);
         }
     }
-
 
     public void Dispose()
     {

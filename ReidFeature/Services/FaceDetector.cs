@@ -1,8 +1,10 @@
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using ReidFeature.Models;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using System.Diagnostics;
 
 namespace ReidFeature.Services;
 
@@ -55,12 +57,12 @@ public sealed class FaceDetector : IDisposable
     /// </summary>
     public List<(Rectangle Bbox, float Confidence)> Detect(Image<Rgb24> image)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var sw = Stopwatch.StartNew();
 
         // 1. Letterbox resize
         using var resized = LetterboxResize(image, InputSize);
 
-        // 2. 构建 CHW tensor (3×320×320)
+        // 2. 构建 CHW tensor (3×640×640)
         var pixelData = NormalizeToTensor(resized);
         var inputTensor = new DenseTensor<float>(pixelData, [1, 3, InputSize, InputSize]);
 
@@ -102,7 +104,7 @@ public sealed class FaceDetector : IDisposable
             if (maxScore < ConfidenceThreshold)
                 continue;
 
-            // bbox 四通道: cx, cy, w, h（像素坐标，0-320）
+            // bbox 四通道: cx, cy, w, h（像素坐标，0-640）
             float cx = outputData[0 * stride + offset];
             float cy = outputData[1 * stride + offset];
             float bw = outputData[2 * stride + offset];
@@ -133,10 +135,36 @@ public sealed class FaceDetector : IDisposable
         }
 
         // 6. NMS
-        var results_list = Nms(candidates);
+        var resultsList = Nms(candidates);
 
-        _logger.LogInformation("人脸检测: {Cnt} 个, 耗时 {Elapsed:F1}ms", results_list.Count, sw.Elapsed.TotalMilliseconds);
-        return results_list;
+        _logger.LogInformation("人脸检测: {Cnt} 个, 耗时 {Elapsed:F1}ms", resultsList.Count, sw.Elapsed.TotalMilliseconds);
+        return resultsList;
+    }
+
+    /// <summary>
+    /// 检测图像中的最佳人脸，返回映射到原始图像坐标的 FaceDetection
+    /// </summary>
+    /// <param name="image">裁剪后的子图像</param>
+    /// <param name="offsetX">子图像在原图中的 X 偏移</param>
+    /// <param name="offsetY">子图像在原图中的 Y 偏移</param>
+    /// <returns>最佳人脸检测结果，无人脸时返回 null</returns>
+    public FaceDetection? DetectBestFace(Image<Rgb24> image, int offsetX, int offsetY)
+    {
+        var faces = Detect(image);
+        if (faces.Count == 0)
+            return null;
+
+        // NMS 结果已按置信度降序排列，首条即为最佳
+        var best = faces[0];
+        return new FaceDetection(
+            new BoundingBox(
+                offsetX + best.Bbox.X,
+                offsetY + best.Bbox.Y,
+                best.Bbox.Width,
+                best.Bbox.Height
+            ),
+            best.Confidence
+        );
     }
 
     private static List<(Rectangle Bbox, float Confidence)> Nms(List<(float X, float Y, float W, float H, float Score)> candidates)

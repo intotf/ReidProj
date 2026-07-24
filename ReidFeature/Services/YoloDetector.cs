@@ -3,6 +3,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using System.Diagnostics;
 
 namespace ReidFeature.Services;
 
@@ -14,7 +15,7 @@ public sealed class YoloDetector : IDisposable
     private readonly ILogger<YoloDetector> _logger;
     private readonly InferenceSession _session;
 
-    // COCO 类别中 person 的索引
+    // COCO 类别中 person 的 索引
     private const int PersonClassId = 0;
 
     // 模型输入尺寸
@@ -59,7 +60,7 @@ public sealed class YoloDetector : IDisposable
     /// </summary>
     public List<(Rectangle Bbox, float Confidence)> Detect(Image<Rgb24> image)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var sw = Stopwatch.StartNew();
 
         // 1. Letterbox resize
         using var resized = LetterboxResize(image, InputSize);
@@ -92,15 +93,13 @@ public sealed class YoloDetector : IDisposable
 
         for (int i = 0; i < numDetections; i++)
         {
-            int offset = i;
             float maxScore = 0;
             int bestClass = -1;
 
             // 找最高分的类别
             for (int c = 0; c < numClasses; c++)
             {
-                // ONNX 图中已内嵌 sigmoid，直接读取即可
-                float score = outputData[(4 + c) * stride + offset];
+                float score = outputData[(4 + c) * stride + i];
                 if (score > maxScore)
                 {
                     maxScore = score;
@@ -113,10 +112,10 @@ public sealed class YoloDetector : IDisposable
                 continue;
 
             // bbox 四通道: cx, cy, w, h（像素坐标，0-640）
-            float cx = outputData[0 * stride + offset];
-            float cy = outputData[1 * stride + offset];
-            float bw = outputData[2 * stride + offset];
-            float bh = outputData[3 * stride + offset];
+            float cx = outputData[0 * stride + i];
+            float cy = outputData[1 * stride + i];
+            float bw = outputData[2 * stride + i];
+            float bh = outputData[3 * stride + i];
 
             // cx,cy,w,h → x1,y1,x2,y2（仍在 letterbox 空间）
             float x1_lb = cx - bw / 2f;
@@ -148,21 +147,18 @@ public sealed class YoloDetector : IDisposable
             ));
         }
 
-
         // 6. NMS
-        var results_list = Nms(candidates);
+        var resultsList = Nms(candidates);
 
-        _logger.LogInformation("YOLO 检测: {Cnt} 人, 耗时 {Elapsed:F1}ms", results_list.Count, sw.Elapsed.TotalMilliseconds);
-        return results_list;
+        _logger.LogInformation("YOLO 检测: {Cnt} 人, 耗时 {Elapsed:F1}ms", resultsList.Count, sw.Elapsed.TotalMilliseconds);
+        return resultsList;
     }
 
     private static List<(Rectangle Bbox, float Confidence)> Nms(List<(float X, float Y, float W, float H, float Score)> candidates)
     {
         var selected = new List<(Rectangle Bbox, float Confidence)>();
         if (candidates.Count == 0)
-        {
             return selected;
-        }
 
         // 按置信度降序排序
         candidates.Sort((a, b) => b.Score.CompareTo(a.Score));
@@ -172,16 +168,12 @@ public sealed class YoloDetector : IDisposable
         for (int i = 0; i < candidates.Count; i++)
         {
             if (removed[i])
-            {
                 continue;
-            }
 
             var (x1, y1, w1, h1, score) = candidates[i];
             // 跳过无效框（宽度或高度非正数）
             if (w1 <= 0 || h1 <= 0)
-            {
                 continue;
-            }
 
             float left1 = Math.Max(0, x1);
             float top1 = Math.Max(0, y1);
@@ -195,15 +187,11 @@ public sealed class YoloDetector : IDisposable
             for (int j = i + 1; j < candidates.Count; j++)
             {
                 if (removed[j])
-                {
                     continue;
-                }
 
                 var (x2, y2, w2, h2, _) = candidates[j];
                 if (w2 <= 0 || h2 <= 0)
-                {
                     continue;
-                }
 
                 float left2 = Math.Max(0, x2);
                 float top2 = Math.Max(0, y2);
@@ -217,18 +205,14 @@ public sealed class YoloDetector : IDisposable
                 float interBottom = Math.Min(bottom1, bottom2);
 
                 if (interLeft >= interRight || interTop >= interBottom)
-                {
                     continue;
-                }
 
                 float interArea = (interRight - interLeft) * (interBottom - interTop);
                 float area2 = w2 * h2;
                 float iou = interArea / (area1 + area2 - interArea);
 
                 if (iou > NmsThreshold)
-                {
                     removed[j] = true;
-                }
             }
         }
 
