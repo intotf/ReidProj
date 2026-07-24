@@ -6,6 +6,7 @@ using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using ReidFeature.Helpers;
 
 namespace ReidFeature.Services;
 
@@ -35,7 +36,7 @@ public sealed class ReIdExtractor : IDisposable
             throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出 ReID 模型", modelPath);
         }
 
-        _logger.LogInformation("加载 ReID 模型: {Path}", modelPath);
+        Log.LoadingReIdModel(_logger, modelPath);
         var opts = new Microsoft.ML.OnnxRuntime.SessionOptions
         {
             IntraOpNumThreads = 1,
@@ -44,7 +45,7 @@ public sealed class ReIdExtractor : IDisposable
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
         };
         _session = new InferenceSession(modelPath, opts);
-        _logger.LogInformation("ReID 模型加载完成");
+        Log.ReIdModelLoaded(_logger);
     }
 
     /// <summary>
@@ -89,7 +90,7 @@ public sealed class ReIdExtractor : IDisposable
             // 4. 输出解析 — 特征向量（通过 DenseTensor.Buffer 直接零拷贝输出）
             var resultTensor = (DenseTensor<float>)results[0].AsTensor<float>();
 
-            _logger.LogInformation("ReID 特征: dim={Dim}, 耗时 {Elapsed:F1}ms", resultTensor.Length, sw.Elapsed.TotalMilliseconds);
+            Log.ReIdFeatureExtracted(_logger, resultTensor.Length, sw.Elapsed.TotalMilliseconds);
             return MemoryMarshal.Cast<float, byte>(resultTensor.Buffer.Span).ToArray();
         }
         finally

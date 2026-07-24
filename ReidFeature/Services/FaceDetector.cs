@@ -39,7 +39,7 @@ public sealed class FaceDetector : IDisposable
             throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出人脸检测模型", modelPath);
         }
 
-        _logger.LogInformation("加载人脸检测模型: {Path}", modelPath);
+        Log.LoadingFaceModel(_logger, modelPath);
         var opts = new Microsoft.ML.OnnxRuntime.SessionOptions
         {
             IntraOpNumThreads = 1,
@@ -48,7 +48,7 @@ public sealed class FaceDetector : IDisposable
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
         };
         _session = new InferenceSession(modelPath, opts);
-        _logger.LogInformation("人脸检测模型加载完成");
+        Log.FaceModelLoaded(_logger);
     }
 
     /// <summary>
@@ -59,14 +59,14 @@ public sealed class FaceDetector : IDisposable
         var sw = Stopwatch.StartNew();
 
         // 1. Letterbox resize
-        using var resized = ImageProcessingHelper.LetterboxResize(image, InputSize);
+        using var resized = ImageProcessor.LetterboxResize(image, InputSize);
 
         // 2. 构建 CHW tensor (3×640×640)
         int bufferSize = 3 * InputSize * InputSize;
         float[] pixelData = ArrayPool<float>.Shared.Rent(bufferSize);
         try
         {
-            ImageProcessingHelper.NormalizeToTensor(resized, pixelData);
+            ImageProcessor.NormalizeToTensor(resized, pixelData);
             var inputTensor = new DenseTensor<float>(pixelData.AsMemory(0, bufferSize), [1, 3, InputSize, InputSize]);
 
             // 3. ONNX 推理
@@ -140,7 +140,7 @@ public sealed class FaceDetector : IDisposable
             // 6. NMS
             var resultsList = Nms(candidates);
 
-            _logger.LogInformation("人脸检测: {Cnt} 个, 耗时 {Elapsed:F1}ms", resultsList.Count, sw.Elapsed.TotalMilliseconds);
+            Log.FaceDetectionCompleted(_logger, resultsList.Count, sw.Elapsed.TotalMilliseconds);
             return resultsList;
         }
         finally

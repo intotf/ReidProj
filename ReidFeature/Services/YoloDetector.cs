@@ -41,7 +41,7 @@ public sealed class YoloDetector : IDisposable
             throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出 YOLO 模型", modelPath);
         }
 
-        _logger.LogInformation("加载 YOLO 模型: {Path}", modelPath);
+        Log.LoadingYoloModel(_logger, modelPath);
         var opts = new Microsoft.ML.OnnxRuntime.SessionOptions
         {
             IntraOpNumThreads = 1,
@@ -50,7 +50,7 @@ public sealed class YoloDetector : IDisposable
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
         };
         _session = new InferenceSession(modelPath, opts);
-        _logger.LogInformation("YOLO 模型加载完成, 输入: {Cnt}", _session.InputMetadata.Count);
+        Log.YoloModelLoaded(_logger, _session.InputMetadata.Count);
     }
 
     /// <summary>
@@ -61,14 +61,14 @@ public sealed class YoloDetector : IDisposable
         var sw = Stopwatch.StartNew();
 
         // 1. Letterbox resize
-        using var resized = ImageProcessingHelper.LetterboxResize(image, InputSize);
+        using var resized = ImageProcessor.LetterboxResize(image, InputSize);
 
         // 2. 构建 CHW tensor (3×640×640)
         int bufferSize = 3 * InputSize * InputSize;
         float[] pixelData = ArrayPool<float>.Shared.Rent(bufferSize);
         try
         {
-            ImageProcessingHelper.NormalizeToTensor(resized, pixelData);
+            ImageProcessor.NormalizeToTensor(resized, pixelData);
             var inputTensor = new DenseTensor<float>(pixelData.AsMemory(0, bufferSize), [1, 3, InputSize, InputSize]);
 
             // 3. ONNX 推理
@@ -153,7 +153,7 @@ public sealed class YoloDetector : IDisposable
             // 6. NMS
             var resultsList = Nms(candidates);
 
-            _logger.LogInformation("YOLO 检测: {Cnt} 人, 耗时 {Elapsed:F1}ms", resultsList.Count, sw.Elapsed.TotalMilliseconds);
+            Log.YoloDetectionCompleted(_logger, resultsList.Count, sw.Elapsed.TotalMilliseconds);
             return resultsList;
         }
         finally

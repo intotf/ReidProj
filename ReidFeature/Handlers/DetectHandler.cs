@@ -1,4 +1,5 @@
 using Microsoft.IO;
+using ReidFeature.Helpers;
 using ReidFeature.Models;
 using ReidFeature.Services;
 using SixLabors.ImageSharp;
@@ -22,11 +23,11 @@ public static class DetectHandler
 
         if (ms.Length == 0)
         {
-            logger.LogWarning("请求体为空");
+            Log.RequestBodyEmpty(logger);
             return Results.BadRequest(new { error = "请求体不能为空，请上传图片" });
         }
 
-        logger.LogInformation("收到图片请求: {Len} bytes", ms.Length);
+        Log.ImageRequestReceived(logger, ms.Length);
 
         Image<Rgb24> image;
         try
@@ -36,23 +37,13 @@ public static class DetectHandler
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "图片解码失败");
+            Log.ImageDecodeFailed(logger, ex);
             return Results.BadRequest(new { error = "不支持的图片格式" });
         }
 
         using (image)
         {
-            List<(Rectangle Box, float Confidence)> detections;
-            try
-            {
-                detections = yolo.Detect(image);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "YOLO 检测失败");
-                return Results.Problem("模型推理失败", statusCode: 500);
-            }
-
+            var detections = yolo.Detect(image);
             if (detections.Count == 0)
             {
                 return Results.Ok(new DetectResponse([]));
@@ -70,10 +61,10 @@ public static class DetectHandler
                 using var cropped = image.Clone(ctx => ctx.Crop(new Rectangle(x, y, w, h)));
 
                 // ReID 特征提取
-                byte[] features = reid.ExtractFeatures(cropped);
+                var features = reid.ExtractFeatures(cropped);
 
                 // 人脸检测（坐标自动映射回原图）
-                FaceDetection? face = faceDetector.DetectBestFace(cropped, box.X, box.Y);
+                var face = faceDetector.DetectBestFace(cropped, box.X, box.Y);
 
                 persons[i] = new PersonDetection(
                     Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),
@@ -83,7 +74,7 @@ public static class DetectHandler
                 );
             }
 
-            logger.LogInformation("检测完成: {Cnt} 个人物", persons.Length);
+            Log.DetectionCompleted(logger, persons.Length);
             return Results.Ok(new DetectResponse(persons));
         }
     }

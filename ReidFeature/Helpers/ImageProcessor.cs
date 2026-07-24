@@ -7,7 +7,7 @@ namespace ReidFeature.Helpers;
 /// <summary>
 /// ONNX 模型推理共用的图像预处理工具
 /// </summary>
-internal static class ImageProcessingHelper
+static class ImageProcessor
 {
     // ImageNet 标准化参数（YOLO 系列通用）
     private static readonly float[] Mean = [0.485f, 0.456f, 0.406f];
