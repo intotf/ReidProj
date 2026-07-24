@@ -3,6 +3,7 @@ using ReidFeature.Models;
 using ReidFeature.Services;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 namespace ReidFeature.Handlers;
 
@@ -13,7 +14,6 @@ public static class DetectHandler
         RecyclableMemoryStreamManager streamManager,
         YoloDetector yolo,
         ReIdExtractor reid,
-        ImageUtils imageUtils,
         ILogger<Program> logger)
     {
         using var ms = streamManager.GetStream("detect");
@@ -31,7 +31,7 @@ public static class DetectHandler
         try
         {
             ms.Position = 0;
-            image = imageUtils.DecodeToRgb(ms);
+            image = Image.Load<Rgb24>(ms);
         }
         catch (Exception ex)
         {
@@ -61,7 +61,11 @@ public static class DetectHandler
             for (int i = 0; i < detections.Count; i++)
             {
                 var (box, conf) = detections[i];
-                using var cropped = imageUtils.CropRegion(image, box);
+                int x = Math.Clamp(box.X, 0, image.Width - 1);
+                int y = Math.Clamp(box.Y, 0, image.Height - 1);
+                int w = Math.Max(1, Math.Min(box.Width, image.Width - x));
+                int h = Math.Max(1, Math.Min(box.Height, image.Height - y));
+                using var cropped = image.Clone(ctx => ctx.Crop(new Rectangle(x, y, w, h)));
                 byte[] features = reid.ExtractFeatures(cropped);
                 persons[i] = new PersonDetection(
                     Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),

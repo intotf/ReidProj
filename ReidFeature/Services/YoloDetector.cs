@@ -2,6 +2,7 @@ using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 namespace ReidFeature.Services;
 
@@ -11,7 +12,6 @@ namespace ReidFeature.Services;
 public sealed class YoloDetector : IDisposable
 {
     private readonly ILogger<YoloDetector> _logger;
-    private readonly ImageUtils _imageUtils;
     private readonly InferenceSession _session;
 
     // COCO 类别中 person 的索引
@@ -24,10 +24,12 @@ public sealed class YoloDetector : IDisposable
     private const float NmsThreshold = 0.3f;
     private const float ConfidenceThreshold = 0.35f;
 
-    public YoloDetector(ILogger<YoloDetector> logger, ImageUtils imageUtils)
+    private static readonly float[] Mean = [0.485f, 0.456f, 0.406f];
+    private static readonly float[] Std = [0.229f, 0.224f, 0.225f];
+
+    public YoloDetector(ILogger<YoloDetector> logger)
     {
         _logger = logger;
-        _imageUtils = imageUtils;
 
         var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "yolo11n.onnx");
         if (!File.Exists(modelPath))
@@ -60,10 +62,10 @@ public sealed class YoloDetector : IDisposable
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         // 1. Letterbox resize
-        using var resized = _imageUtils.LetterboxResize(image, InputSize);
+        using var resized = LetterboxResize(image, InputSize);
 
         // 2. 构建 CHW tensor (3×640×640)
-        var pixelData = _imageUtils.NormalizeToTensor(resized);
+        var pixelData = NormalizeToTensor(resized);
         var inputTensor = new DenseTensor<float>(pixelData, [1, 3, InputSize, InputSize]);
 
         // 3. ONNX 推理
@@ -83,7 +85,7 @@ public sealed class YoloDetector : IDisposable
         // 5. 框解码 + 置信度过滤（使用临时列表）
         var candidates = new List<(float X, float Y, float W, float H, float Score)>(numDetections);
 
-        // letterbox 参数必须与 ImageUtils.LetterboxResize 保持一致
+        // letterbox 参数必须与 LetterboxResize 保持一致
         float scale = Math.Min((float)InputSize / image.Width, (float)InputSize / image.Height);
         float padX = (InputSize - (int)(image.Width * scale)) / 2f;
         float padY = (InputSize - (int)(image.Height * scale)) / 2f;
@@ -233,7 +235,44 @@ public sealed class YoloDetector : IDisposable
         return selected;
     }
 
+    private static Image<Rgb24> LetterboxResize(Image<Rgb24> src, int targetSize)
+    {
+        float scale = Math.Min((float)targetSize / src.Width, (float)targetSize / src.Height);
+        int newW = (int)(src.Width * scale);
+        int newH = (int)(src.Height * scale);
 
+        using var resized = src.Clone(ctx => ctx.Resize(newW, newH, KnownResamplers.Bicubic));
+        var canvas = new Image<Rgb24>(targetSize, targetSize, new Rgb24(114, 114, 114));
+        int offsetX = (targetSize - newW) / 2;
+        int offsetY = (targetSize - newH) / 2;
+
+        canvas.Mutate(ctx => ctx.DrawImage(resized, new Point(offsetX, offsetY), 1f));
+        return canvas;
+    }
+
+    private static float[] NormalizeToTensor(Image<Rgb24> image)
+    {
+        int h = image.Height, w = image.Width;
+        var result = new float[3 * h * w];
+
+        image.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < h; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < w; x++)
+                {
+                    var p = row[x];
+                    int idx = y * w + x;
+                    result[idx] = (p.R / 255f - Mean[0]) / Std[0];
+                    result[h * w + idx] = (p.G / 255f - Mean[1]) / Std[1];
+                    result[2 * h * w + idx] = (p.B / 255f - Mean[2]) / Std[2];
+                }
+            }
+        });
+
+        return result;
+    }
 
     public void Dispose()
     {

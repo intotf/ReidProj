@@ -24,7 +24,6 @@ namespace ReidFeature
 
             // ── 注册服务 ──────────────────────────────────
             builder.Services.AddSingleton(new RecyclableMemoryStreamManager());
-            builder.Services.AddSingleton<ImageUtils>();
             builder.Services.AddSingleton<YoloDetector>();
             builder.Services.AddSingleton<ReIdExtractor>();
 
