@@ -15,6 +15,9 @@ static partial class Log
     [LoggerMessage(EventId = 2, Level = LogLevel.Warning, Message = "图片解码失败")]
     public static partial void ImageDecodeFailed(ILogger logger, Exception exception);
 
+    [LoggerMessage(EventId = 3, Level = LogLevel.Warning, Message = "视频帧解码失败")]
+    public static partial void VideoDecodeFailed(ILogger logger, Exception exception);
+
     [LoggerMessage(EventId = 4, Level = LogLevel.Information, Message = "检测完成: {Cnt} 个人物, 耗时 {Elapsed:F1}ms")]
     public static partial void DetectionCompleted(ILogger logger, int cnt, double elapsed);
 

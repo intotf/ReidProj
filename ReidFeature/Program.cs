@@ -58,11 +58,11 @@ namespace ReidFeature
                .WithName("DetectImage")
                .Accepts<byte[]>("application/octet-stream");
 
-            app.MapPost("/detect/url", DetectHandler.HandleUrlAsync)
-               .WithName("DetectUrl");
+            app.MapPost("/detect/imageurl", DetectHandler.HandleImageUrlAsync)
+               .WithName("DetectImageUrl");
 
-            app.MapPost("/detect/frame", DetectHandler.HandleVideoAsync)
-               .WithName("DetectFrame")
+            app.MapPost("/detect/videoframe", DetectHandler.HandleVideoAsync)
+               .WithName("DetectVideoFrame")
                .Accepts<byte[]>("application/octet-stream");
 
             app.Run();

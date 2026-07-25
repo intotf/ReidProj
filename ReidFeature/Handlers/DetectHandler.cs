@@ -47,7 +47,7 @@ public static class DetectHandler
 
         using (image)
         {
-            return Detect(image, detectService, flags, sw, logger);
+            return DetectImage(image, detectService, flags, sw, logger);
         }
     }
 
@@ -59,7 +59,7 @@ public static class DetectHandler
     /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测)</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="httpClient">用于下载图片的 HTTP 客户端</param>
-    public static async Task<IResult> HandleUrlAsync(
+    public static async Task<IResult> HandleImageUrlAsync(
         UrlDetectRequest request,
         DetectService detectService,
         DetectionFlags? flags,
@@ -92,7 +92,7 @@ public static class DetectHandler
 
             using (image)
             {
-                return Detect(image, detectService, flags, sw, logger);
+                return DetectImage(image, detectService, flags, sw, logger);
             }
         }
         catch (Exception ex)
@@ -117,23 +117,41 @@ public static class DetectHandler
         VideoCodec codec,
         ILogger<Program> logger)
     {
+        if (request.ContentLength == null || request.ContentLength == 0)
+        {
+            Log.RequestBodyEmpty(logger);
+            return Results.BadRequest(new ErrorResponse("请求体不能为空，请上传视频裸流"));
+        }
+
+        Log.ImageRequestReceived(logger, request.ContentLength.Value);
         var sw = Stopwatch.StartNew();
 
+        Image<Rgb24> image;
         try
         {
-            using var image = await VideoDecoder.DecodeSingleFrameAsync(request.Body, codec, logger);
-            return Detect(image, detectService, flags, sw, logger);
+            image = await VideoDecoder.DecodeSingleFrameAsync(request.Body, codec, logger);
         }
         catch (InvalidDataException ex)
         {
+            Log.VideoDecodeFailed(logger, ex);
             return Results.BadRequest(new ErrorResponse(ex.Message));
+        }
+        catch (Exception ex)
+        {
+            Log.VideoDecodeFailed(logger, ex);
+            return Results.BadRequest(new ErrorResponse("视频帧解码失败"));
+        }
+
+        using (image)
+        {
+            return DetectImage(image, detectService, flags, sw, logger);
         }
     }
 
     /// <summary>
     /// 执行检测并拼接响应
     /// </summary>
-    private static IResult Detect(
+    private static IResult DetectImage(
         Image<Rgb24> image,
         DetectService detectService,
         DetectionFlags? flags,
