@@ -54,7 +54,8 @@ namespace ReidFeature
                .WithName("HealthCheck");
 
             app.MapPost("/detect", DetectHandler.HandleAsync)
-               .WithName("DetectPersons");
+               .WithName("DetectPersons")
+               .Accepts<byte[]>("image/png", "image/jpeg", "image/bmp");
 
             app.Run();
         }

@@ -7,6 +7,7 @@
 		<InvariantGlobalization>true</InvariantGlobalization>
 		<PublishAot>true</PublishAot>
 		<AssemblyName>bootstrap</AssemblyName>
+		<RootNamespace>ReidFeature</RootNamespace>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 	</PropertyGroup>
 
@@ -23,10 +24,6 @@
 		<Content Include="models\*.onnx">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</Content>
-	</ItemGroup>
-
-	<ItemGroup>
-		<Folder Include="Results\" />
 	</ItemGroup>
 
 </Project>
