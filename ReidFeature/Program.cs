@@ -1,4 +1,3 @@
-using Microsoft.IO;
 using ReidFeature.Handlers;
 using ReidFeature.Services;
 
@@ -33,10 +32,11 @@ namespace ReidFeature
             });
 
             // ── 注册服务 ──────────────────────────────────
-            builder.Services.AddSingleton(new RecyclableMemoryStreamManager());
             builder.Services.AddSingleton<YoloDetector>();
             builder.Services.AddSingleton<ReIdExtractor>();
             builder.Services.AddSingleton<FaceDetector>();
+
+            builder.Services.AddHttpClient();
 
             builder.Services.AddOpenApi();
 
@@ -53,9 +53,12 @@ namespace ReidFeature
             app.Map("/", context => context.Response.WriteAsync("HealthCheck"))
                .WithName("HealthCheck");
 
-            app.MapPost("/detect", DetectHandler.HandleAsync)
-               .WithName("DetectPersons")
-               .Accepts<byte[]>("image/png", "image/jpeg", "image/bmp");
+            app.MapPost("/detect/image", DetectHandler.HandleImageAsync)
+               .WithName("DetectImage")
+               .Accepts<byte[]>("application/octet-stream");
+
+            app.MapPost("/detect/url", DetectHandler.HandleUrlAsync)
+               .WithName("DetectUrl");
 
             app.Run();
         }

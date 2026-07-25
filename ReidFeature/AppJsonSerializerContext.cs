@@ -8,7 +8,9 @@ namespace ReidFeature
     [JsonSerializable(typeof(BoundingBox))]
     [JsonSerializable(typeof(FaceDetection))]
     [JsonSerializable(typeof(DetectionFlags))]
-    [JsonSerializable(typeof(DetectionFlags?))]
+    [JsonSerializable(typeof(Nullable<DetectionFlags>))]
+    [JsonSerializable(typeof(UrlDetectRequest))]
+    [JsonSerializable(typeof(ErrorResponse))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
 

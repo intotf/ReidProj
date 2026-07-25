@@ -1,4 +1,3 @@
-using Microsoft.IO;
 using ReidFeature.Helpers;
 using ReidFeature.Payloads;
 using ReidFeature.Services;
@@ -10,61 +9,88 @@ using System.Diagnostics;
 namespace ReidFeature.Handlers;
 
 /// <summary>
-/// HTTP API 处理器 — 人物检测端点 /detect
+/// HTTP API 处理器 — 人物检测端点
 /// </summary>
 public static class DetectHandler
 {
     /// <summary>
-    /// 处理检测请求：YOLO 人物检测 → ReID 特征提取 → 人脸检测（可选）
+    /// 处理检测请求：通过原始二进制上传图片
     /// </summary>
-    /// <param name="request">HTTP 请求，包含图片二进制数据</param>
-    /// <param name="streamManager">可回收内存流管理器</param>
-    /// <param name="yolo">YOLO 人物检测器</param>
-    /// <param name="reid">ReID 特征提取器</param>
-    /// <param name="faceDetector">人脸检测器</param>
-    /// <param name="flags">功能开关标志（可选），例如 ?flags=SkipFaceDetection 跳过人脸检测</param>
-    /// <param name="logger">日志记录器</param>
-    /// <returns>检测响应，包含人物框、特征向量和人脸信息（可选）</returns>
-    public static async Task<IResult> HandleAsync(
+    public static async Task<IResult> HandleImageAsync(
         HttpRequest request,
-        RecyclableMemoryStreamManager streamManager,
         YoloDetector yolo,
         ReIdExtractor reid,
         FaceDetector faceDetector,
         DetectionFlags? flags,
         ILogger<Program> logger)
     {
-        using var ms = streamManager.GetStream("detect");
-        await request.Body.CopyToAsync(ms);
-
-        if (ms.Length == 0)
+        if (request.ContentLength == null || request.ContentLength == 0)
         {
             Log.RequestBodyEmpty(logger);
-            return Results.BadRequest(new { error = "请求体不能为空，请上传图片" });
+            return Results.BadRequest(new ErrorResponse("请求体不能为空，请上传图片"));
         }
 
-        Log.ImageRequestReceived(logger, ms.Length);
+        Log.ImageRequestReceived(logger, request.ContentLength.Value);
+        return await HandleStreamAsync(request.Body, yolo, reid, faceDetector, flags, logger);
+    }
 
-        var sw = Stopwatch.StartNew();
-        Image<Rgb24> image;
+    /// <summary>
+    /// 处理检测请求：通过图片 URL 下载后检测
+    /// </summary>
+    public static async Task<IResult> HandleUrlAsync(
+        UrlDetectRequest request,
+        YoloDetector yolo,
+        ReIdExtractor reid,
+        FaceDetector faceDetector,
+        DetectionFlags? flags,
+        ILogger<Program> logger,
+        HttpClient httpClient)
+    {
+        if (string.IsNullOrWhiteSpace(request.ImageUrl))
+        {
+            return Results.BadRequest(new ErrorResponse("url 不能为空"));
+        }
+
         try
         {
-            ms.Position = 0;
-            image = Image.Load<Rgb24>(ms);
+            var response = await httpClient.GetAsync(request.ImageUrl);
+            using var imageStream = await response.EnsureSuccessStatusCode().Content.ReadAsStreamAsync();
+
+            Log.ImageRequestReceived(logger, response.Content.Headers.ContentLength ?? 0);
+            return await HandleStreamAsync(imageStream, yolo, reid, faceDetector, flags, logger);
         }
         catch (Exception ex)
         {
             Log.ImageDecodeFailed(logger, ex);
-            return Results.BadRequest(new { error = "不支持的图片格式" });
+            return Results.BadRequest(new ErrorResponse("无法从 URL 下载图片"));
+        }
+    }
+
+    private static async Task<IResult> HandleStreamAsync(
+        Stream imageStream,
+        YoloDetector yolo,
+        ReIdExtractor reid,
+        FaceDetector faceDetector,
+        DetectionFlags? flags,
+        ILogger<Program> logger)
+    {
+        var sw = Stopwatch.StartNew();
+        Image<Rgb24> image;
+        try
+        {
+            image = await Image.LoadAsync<Rgb24>(imageStream);
+        }
+        catch (Exception ex)
+        {
+            Log.ImageDecodeFailed(logger, ex);
+            return Results.BadRequest(new ErrorResponse("不支持的图片格式"));
         }
 
         using (image)
         {
             var detections = yolo.DetectPersons(image);
             if (detections.Count == 0)
-            {
                 return Results.Ok(new DetectResponse([]));
-            }
 
             var persons = new PersonDetection[detections.Count];
             for (int i = 0; i < detections.Count; i++)
@@ -83,9 +109,7 @@ public static class DetectHandler
                 // 人脸检测（坐标自动映射回原图，可通过 ?flags=SkipFaceDetection 跳过）
                 FaceDetection? face = null;
                 if (flags?.HasFlag(DetectionFlags.SkipFaceDetection) != true)
-                {
                     face = faceDetector.DetectBestFace(cropped, box.X, box.Y);
-                }
 
                 persons[i] = new PersonDetection(
                     Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),
