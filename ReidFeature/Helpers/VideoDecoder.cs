@@ -18,14 +18,15 @@ static class VideoDecoder
     /// <param name="videoStream">H264 或 H265 裸流数据流</param>
     /// <param name="codec">视频编码格式（H264 / H265）</param>
     /// <param name="logger">日志记录器</param>
+    /// <param name="cancellationToken">取消令牌</param>
     /// <returns>解码后的 RGB 图像</returns>
     /// <exception cref="InvalidDataException">视频流数据不完整或格式异常</exception>
-    public static async Task<Image<Rgb24>> DecodeSingleFrameAsync(Stream videoStream, VideoCodec codec, ILogger logger)
+    public static async Task<Image<Rgb24>> DecodeSingleFrameAsync(Stream videoStream, VideoCodec codec, ILogger logger, CancellationToken cancellationToken = default)
     {
         var sw = Stopwatch.StartNew();
 
-        using var process = await StartFfmpegProcessAsync(videoStream, codec);
-        var image = await ReadBmpFromStreamAsync(process.StandardOutput.BaseStream);
+        using var process = await StartFfmpegProcessAsync(videoStream, codec, cancellationToken);
+        var image = await ReadBmpFromStreamAsync(process.StandardOutput.BaseStream, cancellationToken);
 
         sw.Stop();
         Log.VideoDecodeCompleted(logger, codec.ToFfmpegFormat(), sw.Elapsed.TotalMilliseconds);
@@ -36,7 +37,7 @@ static class VideoDecoder
     /// <summary>
     /// 启动 ffmpeg 进程并将视频流 pipe 到其 stdin
     /// </summary>
-    private static async Task<Process> StartFfmpegProcessAsync(Stream videoStream, VideoCodec codec)
+    private static async Task<Process> StartFfmpegProcessAsync(Stream videoStream, VideoCodec codec, CancellationToken cancellationToken = default)
     {
         var ffmpegFileName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
         var ffmpegPath = Path.Combine(AppContext.BaseDirectory, "tools", ffmpegFileName);
@@ -70,7 +71,7 @@ static class VideoDecoder
 
         process.Start();
 
-        await videoStream.CopyToAsync(process.StandardInput.BaseStream);
+        await videoStream.CopyToAsync(process.StandardInput.BaseStream, cancellationToken);
         process.StandardInput.Close();
 
         return process;
@@ -79,7 +80,7 @@ static class VideoDecoder
     /// <summary>
     /// 从 ffmpeg stdout 中读取 BMP 数据并直接解码为图像
     /// </summary>
-    private static async Task<Image<Rgb24>> ReadBmpFromStreamAsync(Stream stdout)
+    private static async Task<Image<Rgb24>> ReadBmpFromStreamAsync(Stream stdout, CancellationToken cancellationToken = default)
     {
         // BMP header 至少 54 字节
         byte[] header = ArrayPool<byte>.Shared.Rent(54);
@@ -88,7 +89,7 @@ static class VideoDecoder
             int read = 0;
             while (read < 54)
             {
-                int n = await stdout.ReadAsync(header.AsMemory(read, 54 - read));
+                int n = await stdout.ReadAsync(header.AsMemory(read, 54 - read), cancellationToken);
                 if (n <= 0) throw new InvalidDataException("视频流数据不完整");
                 read += n;
             }
@@ -104,7 +105,7 @@ static class VideoDecoder
                 read = 0;
                 while (read < remaining)
                 {
-                    int n = await stdout.ReadAsync(bmpBytes.AsMemory(54 + read, remaining - read));
+                    int n = await stdout.ReadAsync(bmpBytes.AsMemory(54 + read, remaining - read), cancellationToken);
                     if (n <= 0) throw new InvalidDataException("视频流数据不完整");
                     read += n;
                 }

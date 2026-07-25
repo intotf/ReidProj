@@ -33,15 +33,12 @@ public sealed class DetectService
     /// <param name="image">输入 RGB 图像</param>
     /// <param name="flags">检测功能标志位</param>
     /// <returns>检测到的人物列表（可能为空）</returns>
-    public PersonDetection[] Detect(Image<Rgb24> image, DetectionFlags? flags)
+    public IEnumerable<PersonDetection> Detect(Image<Rgb24> image, DetectionFlags? flags)
     {
         var detections = _yolo.DetectPersons(image);
         if (detections.Count == 0)
-        {
-            return [];
-        }
+            yield break;
 
-        var persons = new PersonDetection[detections.Count];
         for (int i = 0; i < detections.Count; i++)
         {
             var (box, conf) = detections[i];
@@ -58,13 +55,11 @@ public sealed class DetectService
             if (flags?.HasFlag(DetectionFlags.SkipFaceDetection) != true)
                 face = _faceDetector.DetectBestFace(cropped, box.X, box.Y);
 
-            persons[i] = new PersonDetection(
+            yield return new PersonDetection(
                 Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),
                 Confidence: conf,
                 Features: features,
                 Face: face);
         }
-
-        return persons;
     }
 }

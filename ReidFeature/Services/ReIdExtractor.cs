@@ -1,13 +1,13 @@
+using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using ReidFeature.Helpers;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using ReidFeature.Helpers;
-using Microsoft.Extensions.Options;
 
 namespace ReidFeature.Services;
 
@@ -42,9 +42,7 @@ public sealed class ReIdExtractor : IDisposable
             throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出 ReID 模型", modelPath);
         }
 
-        Log.LoadingReIdModel(_logger, modelPath);
         _session = new InferenceSession(modelPath, onnxOptions.Value.ReId);
-        Log.ReIdModelLoaded(_logger);
     }
 
     /// <summary>

@@ -44,9 +44,7 @@ public sealed class FaceDetector : IDisposable
             throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出人脸检测模型", modelPath);
         }
 
-        Log.LoadingFaceModel(_logger, modelPath);
         _session = new InferenceSession(modelPath, onnxOptions.Value.Face);
-        Log.FaceModelLoaded(_logger);
     }
 
     /// <summary>

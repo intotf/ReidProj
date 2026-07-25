@@ -2,13 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace ReIdSample.Models.Dtos;
 
-// ReidFeature 检测响应反序列化用
-public class ReidDetectResponse
-{
-    [JsonPropertyName("persons")]
-    public List<ReidPersonDetection> Persons { get; set; } = [];
-}
-
 public class ReidPersonDetection
 {
     [JsonPropertyName("bbox")]
@@ -46,4 +39,27 @@ public class ReidBoundingBox
 
     [JsonPropertyName("height")]
     public int Height { get; set; }
+}
+
+/// <summary>
+/// 视频编码格式，对应服务端 ReidFeature.Payloads.VideoCodec
+/// </summary>
+public enum VideoCodec
+{
+    /// <summary>原始 H264 裸流（Annex B）</summary>
+    H264,
+    /// <summary>原始 H265/HEVC 裸流</summary>
+    H265,
+}
+
+/// <summary>
+/// 检测功能开关标志（可组合），对应服务端 ReidFeature.Payloads.DetectionFlags
+/// </summary>
+[Flags]
+public enum DetectionFlags
+{
+    /// <summary>全部开启</summary>
+    All = 0,
+    /// <summary>跳过人脸检测</summary>
+    SkipFaceDetection = 0x1,
 }

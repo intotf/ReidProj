@@ -3,7 +3,7 @@ using ReidFeature.Payloads;
 using ReidFeature.Services;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using System.Diagnostics;
+using System.Runtime.CompilerServices;
 
 namespace ReidFeature.Handlers;
 
@@ -19,35 +19,39 @@ public static class DetectHandler
     /// <param name="detectService">检测编排服务</param>
     /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测)</param>
     /// <param name="logger">日志记录器</param>
-    public static async Task<IResult> HandleImageAsync(
+    /// <param name="cancellationToken">取消令牌</param>
+    public static async IAsyncEnumerable<PersonDetection> HandleImageAsync(
         HttpRequest request,
         DetectService detectService,
         DetectionFlags? flags,
-        ILogger<Program> logger)
+        ILogger<Program> logger,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (request.ContentLength == null || request.ContentLength == 0)
         {
             Log.RequestBodyEmpty(logger);
-            return Results.BadRequest(new ErrorResponse("请求体不能为空，请上传图片"));
+            yield break;
         }
-
-        Log.ImageRequestReceived(logger, request.ContentLength.Value);
-        var sw = Stopwatch.StartNew();
 
         Image<Rgb24> image;
         try
         {
-            image = await Image.LoadAsync<Rgb24>(request.Body);
+            image = await Image.LoadAsync<Rgb24>(request.Body, cancellationToken);
         }
         catch (Exception ex)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             Log.ImageDecodeFailed(logger, ex);
-            return Results.BadRequest(new ErrorResponse("不支持的图片格式"));
+            yield break;
         }
 
         using (image)
         {
-            return DetectImage(image, detectService, flags, sw, logger);
+            foreach (var item in EnumerateDetections(image, detectService, flags))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return item;
+            }
         }
     }
 
@@ -59,46 +63,41 @@ public static class DetectHandler
     /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测)</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="httpClient">用于下载图片的 HTTP 客户端</param>
-    public static async Task<IResult> HandleImageUrlAsync(
+    /// <param name="cancellationToken">取消令牌</param>
+    public static async IAsyncEnumerable<PersonDetection> HandleImageUrlAsync(
         UrlDetectRequest request,
         DetectService detectService,
         DetectionFlags? flags,
         ILogger<Program> logger,
-        HttpClient httpClient)
+        HttpClient httpClient,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.ImageUrl))
         {
-            return Results.BadRequest(new ErrorResponse("url 不能为空"));
+            yield break;
         }
 
+        Image<Rgb24> image;
         try
         {
-            var sw = Stopwatch.StartNew();
-            var response = await httpClient.GetAsync(request.ImageUrl);
-            using var imageStream = await response.EnsureSuccessStatusCode().Content.ReadAsStreamAsync();
-
-            Log.ImageRequestReceived(logger, response.Content.Headers.ContentLength ?? 0);
-
-            Image<Rgb24> image;
-            try
-            {
-                image = await Image.LoadAsync<Rgb24>(imageStream);
-            }
-            catch (Exception ex)
-            {
-                Log.ImageDecodeFailed(logger, ex);
-                return Results.BadRequest(new ErrorResponse("不支持的图片格式"));
-            }
-
-            using (image)
-            {
-                return DetectImage(image, detectService, flags, sw, logger);
-            }
+            using var response = await httpClient.GetAsync(request.ImageUrl, cancellationToken);
+            await using var imageStream = await response.EnsureSuccessStatusCode().Content.ReadAsStreamAsync(cancellationToken);
+            image = await Image.LoadAsync<Rgb24>(imageStream, cancellationToken);
         }
         catch (Exception ex)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             Log.ImageDecodeFailed(logger, ex);
-            return Results.BadRequest(new ErrorResponse("无法从 URL 下载图片"));
+            yield break;
+        }
+
+        using (image)
+        {
+            foreach (var item in EnumerateDetections(image, detectService, flags))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return item;
+            }
         }
     }
 
@@ -110,59 +109,69 @@ public static class DetectHandler
     /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测)</param>
     /// <param name="codec">视频编码格式。可取值: 0=H264(原始 H264 裸流 Annex B), 1=H265(原始 H265/HEVC 裸流)</param>
     /// <param name="logger">日志记录器</param>
-    public static async Task<IResult> HandleVideoAsync(
+    /// <param name="cancellationToken">取消令牌</param>
+    public static async IAsyncEnumerable<PersonDetection> HandleVideoAsync(
         HttpRequest request,
         DetectService detectService,
         DetectionFlags? flags,
         VideoCodec codec,
-        ILogger<Program> logger)
+        ILogger<Program> logger,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (request.ContentLength == null || request.ContentLength == 0)
         {
             Log.RequestBodyEmpty(logger);
-            return Results.BadRequest(new ErrorResponse("请求体不能为空，请上传视频裸流"));
+            yield break;
         }
-
-        Log.ImageRequestReceived(logger, request.ContentLength.Value);
-        var sw = Stopwatch.StartNew();
 
         Image<Rgb24> image;
         try
         {
-            image = await VideoDecoder.DecodeSingleFrameAsync(request.Body, codec, logger);
-        }
-        catch (InvalidDataException ex)
-        {
-            Log.VideoDecodeFailed(logger, ex);
-            return Results.BadRequest(new ErrorResponse(ex.Message));
+            image = await VideoDecoder.DecodeSingleFrameAsync(request.Body, codec, logger, cancellationToken);
         }
         catch (Exception ex)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             Log.VideoDecodeFailed(logger, ex);
-            return Results.BadRequest(new ErrorResponse("视频帧解码失败"));
+            yield break;
         }
 
         using (image)
         {
-            return DetectImage(image, detectService, flags, sw, logger);
+            foreach (var item in EnumerateDetections(image, detectService, flags))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return item;
+            }
         }
     }
 
     /// <summary>
-    /// 执行检测并拼接响应
+    /// 逐项安全枚举检测结果，异常时静默终止
     /// </summary>
-    private static IResult DetectImage(
+    private static IEnumerable<PersonDetection> EnumerateDetections(
         Image<Rgb24> image,
         DetectService detectService,
-        DetectionFlags? flags,
-        Stopwatch sw,
-        ILogger<Program> logger)
+        DetectionFlags? flags)
     {
-        var persons = detectService.Detect(image, flags);
+        using var enumerator = detectService.Detect(image, flags).GetEnumerator();
+        while (true)
+        {
+            PersonDetection item;
+            try
+            {
+                if (!enumerator.MoveNext())
+                {
+                    yield break;
+                }
 
-        sw.Stop();
-        Log.DetectionCompleted(logger, persons.Length, sw.Elapsed.TotalMilliseconds);
-
-        return Results.Ok(new DetectResponse(persons));
+                item = enumerator.Current;
+            }
+            catch (Exception)
+            {
+                yield break;
+            }
+            yield return item;
+        }
     }
 }

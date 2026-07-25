@@ -95,7 +95,7 @@ public class FamilyMembersController : ControllerBase
         {
             await request.Photo.CopyToAsync(ms);
             ms.Position = 0;
-            detections = await _reidClient.DetectAsync(ms);
+            detections = await _reidClient.HandleImageAsync(ms);
         }
 
 
@@ -178,7 +178,7 @@ public class FamilyMembersController : ControllerBase
         {
             await photo.CopyToAsync(ms);
             ms.Position = 0;
-            detections = await _reidClient.DetectAsync(ms);
+            detections = await _reidClient.HandleImageAsync(ms);
         }
 
 

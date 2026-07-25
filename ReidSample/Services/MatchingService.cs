@@ -22,7 +22,7 @@ public class MatchingService
     public async Task<MatchResponse> MatchAsync(Stream imageStream, float threshold, CancellationToken ct = default)
     {
         // 1. 调用 ReidFeature 检测人物 + 提取特征
-        var detections = await _reidClient.DetectAsync(imageStream, ct);
+        var detections = await _reidClient.HandleImageAsync(imageStream, ct: ct);
 
         if (detections.Count == 0)
         {

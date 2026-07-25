@@ -44,9 +44,7 @@ public sealed class YoloDetector : IDisposable
             throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出 YOLO 模型", modelPath);
         }
 
-        Log.LoadingYoloModel(_logger, modelPath);
         _session = new InferenceSession(modelPath, onnxOptions.Value.Yolo);
-        Log.YoloModelLoaded(_logger, _session.InputMetadata.Count);
     }
 
     /// <summary>
