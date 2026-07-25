@@ -22,6 +22,11 @@ public sealed class ReIdExtractor : IDisposable
     private const int InputHeight = 256;
     private const int InputWidth = 128;
 
+    /// <summary>
+    /// 初始化 ReID 特征提取器，加载 ONNX 模型
+    /// </summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="onnxOptions">ONNX Runtime 配置</param>
     public ReIdExtractor(ILogger<ReIdExtractor> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
@@ -93,6 +98,9 @@ public sealed class ReIdExtractor : IDisposable
         }
     }
 
+    /// <summary>
+    /// 释放 ONNX Runtime 会话
+    /// </summary>
     public void Dispose()
     {
         _session?.Dispose();

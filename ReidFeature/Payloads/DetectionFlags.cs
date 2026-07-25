@@ -1,4 +1,4 @@
-namespace ReidFeature.Models;
+namespace ReidFeature.Payloads;
 
 /// <summary>
 /// 检测功能开关标志（可组合，通过 query 参数 flags 传入）

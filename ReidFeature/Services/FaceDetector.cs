@@ -2,7 +2,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using ReidFeature.Helpers;
-using ReidFeature.Models;
+using ReidFeature.Payloads;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Buffers;
@@ -25,6 +25,11 @@ public sealed class FaceDetector : IDisposable
     private const float NmsThreshold = 0.4f;
     private const float ConfidenceThreshold = 0.5f;
 
+    /// <summary>
+    /// 初始化人脸检测器，加载 ONNX 模型
+    /// </summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="onnxOptions">ONNX Runtime 配置</param>
     public FaceDetector(ILogger<FaceDetector> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
@@ -47,6 +52,8 @@ public sealed class FaceDetector : IDisposable
     /// <summary>
     /// 检测图像中的人脸，返回边界框列表（坐标相对于输入图像）
     /// </summary>
+    /// <param name="image">输入 RGB 图像</param>
+    /// <returns>人脸边界框列表（每个元素包含矩形框和置信度），无人脸时返回空列表</returns>
     public List<(Rectangle Bbox, float Confidence)> Detect(Image<Rgb24> image)
     {
         var sw = Stopwatch.StartNew();
@@ -131,6 +138,10 @@ public sealed class FaceDetector : IDisposable
     /// <summary>
     /// 检测图像中的最佳人脸，返回映射到原始图像坐标的 FaceDetection
     /// </summary>
+    /// <param name="image">裁剪后的子图像（人物框内区域）</param>
+    /// <param name="offsetX">子图像在原图中的 X 偏移量</param>
+    /// <param name="offsetY">子图像在原图中的 Y 偏移量</param>
+    /// <returns>最佳人脸检测结果，无人脸时返回 null</returns>
     public FaceDetection? DetectBestFace(Image<Rgb24> image, int offsetX, int offsetY)
     {
         var sw = Stopwatch.StartNew();
@@ -274,6 +285,9 @@ public sealed class FaceDetector : IDisposable
         return selected;
     }
 
+    /// <summary>
+    /// 释放 ONNX Runtime 会话
+    /// </summary>
     public void Dispose()
     {
         _session?.Dispose();

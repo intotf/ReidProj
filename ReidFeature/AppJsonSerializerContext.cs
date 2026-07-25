@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using ReidFeature.Models;
+using ReidFeature.Payloads;
 
 namespace ReidFeature
 {
@@ -7,6 +7,8 @@ namespace ReidFeature
     [JsonSerializable(typeof(PersonDetection[]))]
     [JsonSerializable(typeof(BoundingBox))]
     [JsonSerializable(typeof(FaceDetection))]
+    [JsonSerializable(typeof(DetectionFlags))]
+    [JsonSerializable(typeof(DetectionFlags?))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
 

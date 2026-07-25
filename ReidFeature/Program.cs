@@ -4,8 +4,14 @@ using ReidFeature.Services;
 
 namespace ReidFeature
 {
+    /// <summary>
+    /// 应用程序入口点
+    /// </summary>
     public class Program
     {
+        /// <summary>
+        /// 应用程序入口 — 构建服务、注册中间件、启动 Kestrel 主机
+        /// </summary>
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateSlimBuilder(args);
@@ -32,9 +38,18 @@ namespace ReidFeature
             builder.Services.AddSingleton<ReIdExtractor>();
             builder.Services.AddSingleton<FaceDetector>();
 
+            builder.Services.AddOpenApi();
+
             var app = builder.Build();
 
+            app.UseSwaggerUI(options =>
+            {
+                options.SwaggerEndpoint("/openapi/v1.json", "v1");
+            });
+
             // ── 路由端点 ──────────────────────────────────
+            app.MapOpenApi();
+
             app.Map("/", context => context.Response.WriteAsync("HealthCheck"))
                .WithName("HealthCheck");
 

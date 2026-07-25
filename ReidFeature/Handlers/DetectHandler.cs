@@ -1,6 +1,6 @@
 using Microsoft.IO;
 using ReidFeature.Helpers;
-using ReidFeature.Models;
+using ReidFeature.Payloads;
 using ReidFeature.Services;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -9,8 +9,22 @@ using System.Diagnostics;
 
 namespace ReidFeature.Handlers;
 
+/// <summary>
+/// HTTP API 处理器 — 人物检测端点 /detect
+/// </summary>
 public static class DetectHandler
 {
+    /// <summary>
+    /// 处理检测请求：YOLO 人物检测 → ReID 特征提取 → 人脸检测（可选）
+    /// </summary>
+    /// <param name="request">HTTP 请求，包含图片二进制数据</param>
+    /// <param name="streamManager">可回收内存流管理器</param>
+    /// <param name="yolo">YOLO 人物检测器</param>
+    /// <param name="reid">ReID 特征提取器</param>
+    /// <param name="faceDetector">人脸检测器</param>
+    /// <param name="flags">功能开关标志（可选），例如 ?flags=SkipFaceDetection 跳过人脸检测</param>
+    /// <param name="logger">日志记录器</param>
+    /// <returns>检测响应，包含人物框、特征向量和人脸信息（可选）</returns>
     public static async Task<IResult> HandleAsync(
         HttpRequest request,
         RecyclableMemoryStreamManager streamManager,

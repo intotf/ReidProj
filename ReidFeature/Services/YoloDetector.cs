@@ -24,6 +24,11 @@ public sealed class YoloDetector : IDisposable
     private const float NmsThreshold = 0.3f;
     private const float ConfidenceThreshold = 0.35f;
 
+    /// <summary>
+    /// 初始化 YOLO 人物检测器，加载 ONNX 模型
+    /// </summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="onnxOptions">ONNX Runtime 配置</param>
     public YoloDetector(ILogger<YoloDetector> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
@@ -47,6 +52,8 @@ public sealed class YoloDetector : IDisposable
     /// <summary>
     /// 检测图像中的人物，返回边界框列表
     /// </summary>
+    /// <param name="image">输入 RGB 图像</param>
+    /// <returns>人物边界框列表（每个元素包含矩形框和置信度），无人时返回空列表</returns>
     public List<(Rectangle Bbox, float Confidence)> DetectPersons(Image<Rgb24> image)
     {
         var sw = Stopwatch.StartNew();
@@ -205,6 +212,9 @@ public sealed class YoloDetector : IDisposable
         return selected;
     }
 
+    /// <summary>
+    /// 释放 ONNX Runtime 会话
+    /// </summary>
     public void Dispose()
     {
         _session?.Dispose();
