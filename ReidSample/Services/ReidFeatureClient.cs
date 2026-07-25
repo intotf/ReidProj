@@ -52,18 +52,18 @@ public class ReidFeatureClient
     }
 
     /// <summary>
-    /// 上传 H264/H265 裸流帧进行检测（POST /detect/videoframe）
+    /// 上传 H264 裸流进行检测（POST /detect/h264stream）
     /// </summary>
-    /// <param name="videoStream">H264 或 H265 裸流数据流</param>
-    /// <param name="codec">视频编码格式</param>
+    /// <param name="h264Stream">H264 裸流数据流</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 5 表示每 5 秒一帧</param>
     /// <param name="flags">检测功能标志位</param>
     /// <param name="ct">取消令牌</param>
-    public async IAsyncEnumerable<ReidPersonDetection> HandleVideoAsync(Stream videoStream, VideoCodec codec, DetectionFlags? flags = null, [EnumeratorCancellation] CancellationToken ct = default)
+    public async IAsyncEnumerable<ReidPersonDetection> HandleH264Async(Stream h264Stream, int frameIntervalSeconds, DetectionFlags? flags = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
-        using var content = new StreamContent(videoStream);
+        using var content = new StreamContent(h264Stream);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
-        var url = BuildUrl("/detect/videoframe", flags, codec);
+        var url = BuildUrl("/detect/h264stream", flags, frameIntervalSeconds);
         using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
@@ -78,16 +78,46 @@ public class ReidFeatureClient
             }
         }
 
-        _logger.LogInformation("ReidFeature 视频检测完成: {Count} 个人物", count);
+        _logger.LogInformation("ReidFeature H264 检测完成: {Count} 个人物", count);
     }
 
-    private static string BuildUrl(string basePath, DetectionFlags? flags, VideoCodec? codec = null)
+    /// <summary>
+    /// 上传 H265 裸流进行检测（POST /detect/h265stream）
+    /// </summary>
+    /// <param name="h265Stream">H265 裸流数据流</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
+    /// <param name="flags">检测功能标志位</param>
+    /// <param name="ct">取消令牌</param>
+    public async IAsyncEnumerable<ReidPersonDetection> HandleH265Async(Stream h265Stream, int frameIntervalSeconds, DetectionFlags? flags = null, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        using var content = new StreamContent(h265Stream);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+        var url = BuildUrl("/detect/h265stream", flags, frameIntervalSeconds);
+        using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        response.EnsureSuccessStatusCode();
+
+        int count = 0;
+        await foreach (var item in response.Content.ReadFromJsonAsAsyncEnumerable<ReidPersonDetection>(_jsonOptions, ct))
+        {
+            if (item is not null)
+            {
+                count++;
+                yield return item;
+            }
+        }
+
+        _logger.LogInformation("ReidFeature H265 检测完成: {Count} 个人物", count);
+    }
+
+    private static string BuildUrl(string basePath, DetectionFlags? flags, int? frameIntervalSeconds = null)
     {
         var query = new List<string>();
         if (flags.HasValue)
             query.Add($"flags={(int)flags.Value}");
-        if (codec.HasValue)
-            query.Add($"codec={(int)codec.Value}");
+        if (frameIntervalSeconds.HasValue)
+            query.Add($"frameIntervalSeconds={frameIntervalSeconds.Value}");
 
         return query.Count > 0 ? $"{basePath}?{string.Join("&", query)}" : basePath;
     }

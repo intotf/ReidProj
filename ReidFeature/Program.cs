@@ -61,8 +61,12 @@ namespace ReidFeature
             app.MapPost("/detect/imageurl", DetectHandler.HandleImageUrlAsync)
                .WithName("DetectImageUrl");
 
-            app.MapPost("/detect/videoframe", DetectHandler.HandleVideoAsync)
-               .WithName("DetectVideoFrame")
+            app.MapPost("/detect/h264stream", DetectHandler.HandleH264StreamAsync)
+               .WithName("DetectH264Stream")
+               .Accepts<byte[]>("application/octet-stream");
+
+            app.MapPost("/detect/h265stream", DetectHandler.HandleH265StreamAsync)
+               .WithName("DetectH265Stream")
                .Accepts<byte[]>("application/octet-stream");
 
             app.Run();
