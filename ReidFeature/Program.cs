@@ -35,6 +35,7 @@ namespace ReidFeature
             builder.Services.AddSingleton<YoloDetector>();
             builder.Services.AddSingleton<ReIdExtractor>();
             builder.Services.AddSingleton<FaceDetector>();
+            builder.Services.AddSingleton<DetectService>();
 
             builder.Services.AddHttpClient();
 
@@ -59,6 +60,10 @@ namespace ReidFeature
 
             app.MapPost("/detect/url", DetectHandler.HandleUrlAsync)
                .WithName("DetectUrl");
+
+            app.MapPost("/detect/frame", DetectHandler.HandleVideoAsync)
+               .WithName("DetectFrame")
+               .Accepts<byte[]>("application/octet-stream");
 
             app.Run();
         }

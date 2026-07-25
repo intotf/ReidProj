@@ -3,7 +3,6 @@ using ReidFeature.Payloads;
 using ReidFeature.Services;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 using System.Diagnostics;
 
 namespace ReidFeature.Handlers;
@@ -16,11 +15,13 @@ public static class DetectHandler
     /// <summary>
     /// 处理检测请求：通过原始二进制上传图片
     /// </summary>
+    /// <param name="request">HTTP 请求体，包含原始图片二进制数据</param>
+    /// <param name="detectService">检测编排服务</param>
+    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测)</param>
+    /// <param name="logger">日志记录器</param>
     public static async Task<IResult> HandleImageAsync(
         HttpRequest request,
-        YoloDetector yolo,
-        ReIdExtractor reid,
-        FaceDetector faceDetector,
+        DetectService detectService,
         DetectionFlags? flags,
         ILogger<Program> logger)
     {
@@ -31,17 +32,36 @@ public static class DetectHandler
         }
 
         Log.ImageRequestReceived(logger, request.ContentLength.Value);
-        return await HandleStreamAsync(request.Body, yolo, reid, faceDetector, flags, logger);
+        var sw = Stopwatch.StartNew();
+
+        Image<Rgb24> image;
+        try
+        {
+            image = await Image.LoadAsync<Rgb24>(request.Body);
+        }
+        catch (Exception ex)
+        {
+            Log.ImageDecodeFailed(logger, ex);
+            return Results.BadRequest(new ErrorResponse("不支持的图片格式"));
+        }
+
+        using (image)
+        {
+            return Detect(image, detectService, flags, sw, logger);
+        }
     }
 
     /// <summary>
     /// 处理检测请求：通过图片 URL 下载后检测
     /// </summary>
+    /// <param name="request">URL 检测请求，包含 ImageUrl 属性</param>
+    /// <param name="detectService">检测编排服务</param>
+    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测)</param>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="httpClient">用于下载图片的 HTTP 客户端</param>
     public static async Task<IResult> HandleUrlAsync(
         UrlDetectRequest request,
-        YoloDetector yolo,
-        ReIdExtractor reid,
-        FaceDetector faceDetector,
+        DetectService detectService,
         DetectionFlags? flags,
         ILogger<Program> logger,
         HttpClient httpClient)
@@ -53,11 +73,27 @@ public static class DetectHandler
 
         try
         {
+            var sw = Stopwatch.StartNew();
             var response = await httpClient.GetAsync(request.ImageUrl);
             using var imageStream = await response.EnsureSuccessStatusCode().Content.ReadAsStreamAsync();
 
             Log.ImageRequestReceived(logger, response.Content.Headers.ContentLength ?? 0);
-            return await HandleStreamAsync(imageStream, yolo, reid, faceDetector, flags, logger);
+
+            Image<Rgb24> image;
+            try
+            {
+                image = await Image.LoadAsync<Rgb24>(imageStream);
+            }
+            catch (Exception ex)
+            {
+                Log.ImageDecodeFailed(logger, ex);
+                return Results.BadRequest(new ErrorResponse("不支持的图片格式"));
+            }
+
+            using (image)
+            {
+                return Detect(image, detectService, flags, sw, logger);
+            }
         }
         catch (Exception ex)
         {
@@ -66,61 +102,49 @@ public static class DetectHandler
         }
     }
 
-    private static async Task<IResult> HandleStreamAsync(
-        Stream imageStream,
-        YoloDetector yolo,
-        ReIdExtractor reid,
-        FaceDetector faceDetector,
+    /// <summary>
+    /// 处理检测请求：上传 H264/H265 裸流帧，解码后检测
+    /// </summary>
+    /// <param name="request">HTTP 请求体，包含 H264 或 H265 裸流数据</param>
+    /// <param name="detectService">检测编排服务</param>
+    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测)</param>
+    /// <param name="codec">视频编码格式。可取值: 0=H264(原始 H264 裸流 Annex B), 1=H265(原始 H265/HEVC 裸流)</param>
+    /// <param name="logger">日志记录器</param>
+    public static async Task<IResult> HandleVideoAsync(
+        HttpRequest request,
+        DetectService detectService,
         DetectionFlags? flags,
+        VideoCodec codec,
         ILogger<Program> logger)
     {
         var sw = Stopwatch.StartNew();
-        Image<Rgb24> image;
+
         try
         {
-            image = await Image.LoadAsync<Rgb24>(imageStream);
+            using var image = await VideoDecoder.DecodeSingleFrameAsync(request.Body, codec, logger);
+            return Detect(image, detectService, flags, sw, logger);
         }
-        catch (Exception ex)
+        catch (InvalidDataException ex)
         {
-            Log.ImageDecodeFailed(logger, ex);
-            return Results.BadRequest(new ErrorResponse("不支持的图片格式"));
+            return Results.BadRequest(new ErrorResponse(ex.Message));
         }
+    }
 
-        using (image)
-        {
-            var detections = yolo.DetectPersons(image);
-            if (detections.Count == 0)
-                return Results.Ok(new DetectResponse([]));
+    /// <summary>
+    /// 执行检测并拼接响应
+    /// </summary>
+    private static IResult Detect(
+        Image<Rgb24> image,
+        DetectService detectService,
+        DetectionFlags? flags,
+        Stopwatch sw,
+        ILogger<Program> logger)
+    {
+        var persons = detectService.Detect(image, flags);
 
-            var persons = new PersonDetection[detections.Count];
-            for (int i = 0; i < detections.Count; i++)
-            {
-                var (box, conf) = detections[i];
-                int x = Math.Clamp(box.X, 0, image.Width - 1);
-                int y = Math.Clamp(box.Y, 0, image.Height - 1);
-                int w = Math.Max(1, Math.Min(box.Width, image.Width - x));
-                int h = Math.Max(1, Math.Min(box.Height, image.Height - y));
+        sw.Stop();
+        Log.DetectionCompleted(logger, persons.Length, sw.Elapsed.TotalMilliseconds);
 
-                using var cropped = image.Clone(ctx => ctx.Crop(new Rectangle(x, y, w, h)));
-
-                // ReID 特征提取
-                var features = reid.ExtractFeatures(cropped);
-
-                // 人脸检测（坐标自动映射回原图，可通过 ?flags=SkipFaceDetection 跳过）
-                FaceDetection? face = null;
-                if (flags?.HasFlag(DetectionFlags.SkipFaceDetection) != true)
-                    face = faceDetector.DetectBestFace(cropped, box.X, box.Y);
-
-                persons[i] = new PersonDetection(
-                    Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),
-                    Confidence: conf,
-                    Features: features,
-                    Face: face
-                );
-            }
-
-            Log.DetectionCompleted(logger, persons.Length, sw.Elapsed.TotalMilliseconds);
-            return Results.Ok(new DetectResponse(persons));
-        }
+        return Results.Ok(new DetectResponse(persons));
     }
 }

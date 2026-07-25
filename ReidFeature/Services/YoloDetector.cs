@@ -21,8 +21,8 @@ public sealed class YoloDetector : IDisposable
     private const int InputSize = 640;
 
     // NMS 参数
-    private const float NmsThreshold = 0.3f;
-    private const float ConfidenceThreshold = 0.35f;
+    private const float NmsThreshold = 0.45f;
+    private const float ConfidenceThreshold = 0.20f;
 
     /// <summary>
     /// 初始化 YOLO 人物检测器，加载 ONNX 模型

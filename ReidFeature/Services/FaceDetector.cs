@@ -23,7 +23,7 @@ public sealed class FaceDetector : IDisposable
 
     // NMS 参数
     private const float NmsThreshold = 0.4f;
-    private const float ConfidenceThreshold = 0.5f;
+    private const float ConfidenceThreshold = 0.4f;
 
     /// <summary>
     /// 初始化人脸检测器，加载 ONNX 模型

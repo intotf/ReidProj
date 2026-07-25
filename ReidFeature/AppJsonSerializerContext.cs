@@ -11,6 +11,7 @@ namespace ReidFeature
     [JsonSerializable(typeof(Nullable<DetectionFlags>))]
     [JsonSerializable(typeof(UrlDetectRequest))]
     [JsonSerializable(typeof(ErrorResponse))]
+    [JsonSerializable(typeof(VideoCodec))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
 

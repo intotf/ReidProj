@@ -53,4 +53,8 @@ static partial class Log
 
     [LoggerMessage(EventId = 34, Level = LogLevel.Debug, Message = "未检测到最佳人脸, 耗时 {Elapsed:F1}ms")]
     public static partial void BestFaceNotFound(ILogger logger, double elapsed);
+
+    // ===== VideoDecoder =====
+    [LoggerMessage(EventId = 40, Level = LogLevel.Information, Message = "视频解码完成, 编码格式: {Codec}, 耗时 {Elapsed:F1}ms")]
+    public static partial void VideoDecodeCompleted(ILogger logger, string codec, double elapsed);
 }
