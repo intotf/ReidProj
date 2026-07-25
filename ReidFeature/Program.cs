@@ -35,7 +35,7 @@ namespace ReidFeature
             var app = builder.Build();
 
             // ── 路由端点 ──────────────────────────────────
-            app.MapGet("/", () => Results.Ok(new { status = "healthy", service = "reid-api" }))
+            app.Map("/", context => context.Response.WriteAsync("HealthCheck"))
                .WithName("HealthCheck");
 
             app.MapPost("/detect", DetectHandler.HandleAsync)
