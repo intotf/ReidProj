@@ -11,4 +11,7 @@ public enum DetectionFlags
 
     /// <summary>跳过人脸检测</summary>
     SkipFaceDetection = 0x1,
+
+    /// <summary>视频帧首次检测到目标后立即停止处理后续帧（仅支持流式视频端点）</summary>
+    StopOnFirstFrameHit = 0x2,
 }

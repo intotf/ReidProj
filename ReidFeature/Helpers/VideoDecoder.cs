@@ -33,8 +33,9 @@ static class VideoDecoder
         var sw = Stopwatch.StartNew();
         int frameCount = 0;
 
-        var process = StartFfmpegProcess(codec, frameIntervalSeconds);
-        var writeTask = WriteToStdInpuAsync(videoStream, process.StandardInput, cancellationToken);
+        using var process = StartFfmpegProcess(codec, frameIntervalSeconds);
+        using var writeTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var writeTask = WriteToStdInputAsync(videoStream, process.StandardInput, writeTokenSource.Token);
 
         try
         {
@@ -47,6 +48,12 @@ static class VideoDecoder
         }
         finally
         {
+            if (!process.HasExited)
+            {
+                try { process.Kill(); } catch { }
+            }
+
+            writeTokenSource.Cancel();
             await writeTask;
         }
 
@@ -58,7 +65,7 @@ static class VideoDecoder
     /// <summary>
     /// 将视频流 pipe 到 ffmpeg 的 stdin 并关闭
     /// </summary>
-    private static async Task WriteToStdInpuAsync(Stream videoStream, StreamWriter stdInput, CancellationToken cancellationToken)
+    private static async Task WriteToStdInputAsync(Stream videoStream, StreamWriter stdInput, CancellationToken cancellationToken)
     {
         try
         {
@@ -66,11 +73,17 @@ static class VideoDecoder
         }
         catch (Exception)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            // 吃掉所有异常
         }
         finally
         {
-            stdInput.Close();
+            try
+            {
+                stdInput.Close();
+            }
+            catch (Exception)
+            {
+            }
         }
     }
 
@@ -121,7 +134,7 @@ static class VideoDecoder
     private static async IAsyncEnumerable<Image<Rgb24>> ReadBmpFramesAsync(
         Stream stdout,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    { 
+    {
         byte[] header = ArrayPool<byte>.Shared.Rent(54);
         try
         {

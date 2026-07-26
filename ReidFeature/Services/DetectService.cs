@@ -36,10 +36,11 @@ public sealed class DetectService
     /// </summary>
     /// <param name="image">输入 RGB 图像</param>
     /// <param name="flags">检测功能标志位</param>
+    /// <param name="frameIndex">帧索引（视频场景下传入当前帧序号；非视频场景默认为 0）</param>
     /// <returns>检测到的人物列表（可能为空）</returns>
-    public IEnumerable<PersonDetection> DetectPersons(Image<Rgb24> image, DetectionFlags? flags)
+    public IEnumerable<PersonDetection> DetectPersons(Image<Rgb24> image, DetectionFlags flags, int frameIndex = 0)
     {
-        using var enumerator = this.RunPipeline(image, flags).GetEnumerator();
+        using var enumerator = this.RunPipeline(image, flags, frameIndex).GetEnumerator();
         while (true)
         {
             PersonDetection item;
@@ -67,8 +68,9 @@ public sealed class DetectService
     /// </summary>
     /// <param name="image">输入 RGB 图像</param>
     /// <param name="flags">检测功能标志位</param>
+    /// <param name="frameIndex">帧索引</param>
     /// <returns>检测到的人物列表（可能为空）</returns>
-    private IEnumerable<PersonDetection> RunPipeline(Image<Rgb24> image, DetectionFlags? flags)
+    private IEnumerable<PersonDetection> RunPipeline(Image<Rgb24> image, DetectionFlags flags, int frameIndex)
     {
         var detections = _yolo.DetectPersons(image);
         if (detections.Count == 0)
@@ -87,12 +89,13 @@ public sealed class DetectService
             using var cropped = image.Clone(ctx => ctx.Crop(new Rectangle(x, y, w, h)));
 
             FaceDetection? face = null;
-            if (flags?.HasFlag(DetectionFlags.SkipFaceDetection) != true)
+            if (!flags.HasFlag(DetectionFlags.SkipFaceDetection))
             {
                 face = _faceDetector.DetectBestFace(cropped, box.X, box.Y);
             }
 
             yield return new PersonDetection(
+                FrameIndex: frameIndex,
                 Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),
                 Confidence: conf,
                 Features: _reid.ExtractFeatures(cropped),

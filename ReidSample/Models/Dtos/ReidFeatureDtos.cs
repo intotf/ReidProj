@@ -4,6 +4,9 @@ namespace ReIdSample.Models.Dtos;
 
 public class ReidPersonDetection
 {
+    [JsonPropertyName("frameIndex")]
+    public int FrameIndex { get; set; }
+
     [JsonPropertyName("bbox")]
     public ReidBoundingBox Bbox { get; set; } = null!;
 
@@ -42,17 +45,6 @@ public class ReidBoundingBox
 }
 
 /// <summary>
-/// 视频编码格式，对应服务端 ReidFeature.Payloads.VideoCodec
-/// </summary>
-public enum VideoCodec
-{
-    /// <summary>原始 H264 裸流（Annex B）</summary>
-    H264,
-    /// <summary>原始 H265/HEVC 裸流</summary>
-    H265,
-}
-
-/// <summary>
 /// 检测功能开关标志（可组合），对应服务端 ReidFeature.Payloads.DetectionFlags
 /// </summary>
 [Flags]
@@ -62,4 +54,6 @@ public enum DetectionFlags
     All = 0,
     /// <summary>跳过人脸检测</summary>
     SkipFaceDetection = 0x1,
+    /// <summary>视频帧首次检测到目标后立即停止处理后续帧（仅支持流式视频端点）</summary>
+    StopOnFirstFrameHit = 0x2,
 }
