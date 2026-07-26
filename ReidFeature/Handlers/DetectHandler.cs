@@ -47,7 +47,7 @@ public static class DetectHandler
 
         using (image)
         {
-            foreach (var item in EnumerateDetections(image, detectService, flags))
+            foreach (var item in detectService.DetectPersons(image, flags))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return item;
@@ -93,7 +93,7 @@ public static class DetectHandler
 
         using (image)
         {
-            foreach (var item in EnumerateDetections(image, detectService, flags))
+            foreach (var item in detectService.DetectPersons(image, flags))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return item;
@@ -190,42 +190,13 @@ public static class DetectHandler
 
                 using (image)
                 {
-                    foreach (var item in EnumerateDetections(image, detectService, flags))
+                    foreach (var item in detectService.DetectPersons(image, flags))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         yield return item;
                     }
                 }
             }
-        }
-    }
-
-    /// <summary>
-    /// 逐项安全枚举检测结果，异常时静默终止
-    /// </summary>
-    private static IEnumerable<PersonDetection> EnumerateDetections(
-        Image<Rgb24> image,
-        DetectService detectService,
-        DetectionFlags? flags)
-    {
-        using var enumerator = detectService.Detect(image, flags).GetEnumerator();
-        while (true)
-        {
-            PersonDetection item;
-            try
-            {
-                if (!enumerator.MoveNext())
-                {
-                    yield break;
-                }
-
-                item = enumerator.Current;
-            }
-            catch (Exception)
-            {
-                yield break;
-            }
-            yield return item;
         }
     }
 }

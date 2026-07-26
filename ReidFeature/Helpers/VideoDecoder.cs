@@ -34,7 +34,7 @@ static class VideoDecoder
         int frameCount = 0;
 
         var process = StartFfmpegProcess(codec, frameIntervalSeconds);
-        var pipeTask = PipeStdinAsync(videoStream, process, cancellationToken);
+        var writeTask = WriteToStdInpuAsync(videoStream, process.StandardInput, cancellationToken);
 
         try
         {
@@ -47,7 +47,7 @@ static class VideoDecoder
         }
         finally
         {
-            await pipeTask;
+            await writeTask;
         }
 
         sw.Stop();
@@ -58,16 +58,19 @@ static class VideoDecoder
     /// <summary>
     /// 将视频流 pipe 到 ffmpeg 的 stdin 并关闭
     /// </summary>
-    private static async Task PipeStdinAsync(Stream videoStream, Process process, CancellationToken cancellationToken)
+    private static async Task WriteToStdInpuAsync(Stream videoStream, StreamWriter stdInput, CancellationToken cancellationToken)
     {
         try
         {
-            await videoStream.CopyToAsync(process.StandardInput.BaseStream, cancellationToken);
-            process.StandardInput.Close();
+            await videoStream.CopyToAsync(stdInput.BaseStream, cancellationToken);
         }
         catch (Exception)
         {
             cancellationToken.ThrowIfCancellationRequested();
+        }
+        finally
+        {
+            stdInput.Close();
         }
     }
 
@@ -118,7 +121,7 @@ static class VideoDecoder
     private static async IAsyncEnumerable<Image<Rgb24>> ReadBmpFramesAsync(
         Stream stdout,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
+    { 
         byte[] header = ArrayPool<byte>.Shared.Rent(54);
         try
         {

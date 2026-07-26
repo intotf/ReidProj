@@ -34,4 +34,7 @@ static partial class Log
 
     [LoggerMessage(Level = LogLevel.Information, Message = "视频全部解码完成, 共 {TotalFrames} 帧, 格式: {Codec}, 总耗时 {Elapsed:F1}ms")]
     public static partial void VideoDecodeAllCompleted(ILogger logger, int totalFrames, string codec, double elapsed);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "检测管线异常")]
+    public static partial void DetectPipelineFailed(ILogger logger, Exception exception);
 }
