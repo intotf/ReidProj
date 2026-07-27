@@ -135,34 +135,31 @@ static class VideoDecoder
         Stream stdout,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        byte[] header = ArrayPool<byte>.Shared.Rent(54);
+        const int BmpHeaderSize = 54;
+        byte[] header = ArrayPool<byte>.Shared.Rent(BmpHeaderSize);
         try
         {
             while (true)
             {
-                int read = 0;
-                while (read < 54)
+                int read = await stdout.ReadAtLeastAsync(
+                    header.AsMemory(0, BmpHeaderSize),
+                    BmpHeaderSize,
+                    throwOnEndOfStream: false,
+                    cancellationToken);
+
+                if (read < BmpHeaderSize)
                 {
-                    int n = await stdout.ReadAsync(header.AsMemory(read, 54 - read), cancellationToken);
-                    if (n <= 0)
-                        yield break;
-                    read += n;
+                    yield break;
                 }
 
                 int fileSize = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(2));
-                int remaining = fileSize - 54;
+                int remaining = fileSize - BmpHeaderSize;
 
                 byte[] bmpBytes = ArrayPool<byte>.Shared.Rent(fileSize);
                 try
                 {
-                    header.AsSpan(0, 54).CopyTo(bmpBytes);
-                    read = 0;
-                    while (read < remaining)
-                    {
-                        int n = await stdout.ReadAsync(bmpBytes.AsMemory(54 + read, remaining - read), cancellationToken);
-                        if (n <= 0) throw new InvalidDataException("视频流数据不完整");
-                        read += n;
-                    }
+                    header.AsSpan(0, BmpHeaderSize).CopyTo(bmpBytes);
+                    await stdout.ReadExactlyAsync(bmpBytes.AsMemory(BmpHeaderSize, remaining), cancellationToken);
 
                     yield return Image.Load<Rgb24>(bmpBytes.AsSpan(0, fileSize));
                 }
