@@ -1,58 +1,58 @@
+using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using ReidFeature.Helpers;
+using ReidFeature.Payloads;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Buffers;
 using System.Diagnostics;
-using Microsoft.Extensions.Options;
 
 namespace ReidFeature.Services;
 
 /// <summary>
-/// YOLOv11n ONNX 推理 + NMS 后处理，仅过滤人物（class=0）
+/// YOLOv11n-face ONNX 推理 + NMS 后处理，人脸检测
 /// </summary>
-public sealed class YoloDetector : IDisposable
+public sealed class FaceDetector : IDisposable
 {
-    private readonly ILogger<YoloDetector> _logger;
+    private readonly ILogger<FaceDetector> _logger;
     private readonly InferenceSession _session;
 
     // 模型输入尺寸
     private const int InputSize = 640;
 
     // NMS 参数
-    private const float NmsThreshold = 0.45f;
-    private const float ConfidenceThreshold = 0.20f;
+    private const float NmsThreshold = 0.4f;
+    private const float ConfidenceThreshold = 0.4f;
 
     /// <summary>
-    /// 初始化 YOLO 人物检测器，加载 ONNX 模型
+    /// 初始化人脸检测器，加载 ONNX 模型
     /// </summary>
     /// <param name="logger">日志记录器</param>
     /// <param name="onnxOptions">ONNX Runtime 配置</param>
-    public YoloDetector(ILogger<YoloDetector> logger, IOptions<OnnxSessionOptions> onnxOptions)
+    public FaceDetector(ILogger<FaceDetector> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
 
-        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "yolo11n.onnx");
+        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "yolo11n-face.onnx");
         if (!File.Exists(modelPath))
         {
-            // 回退到项目目录
-            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "yolo11n.onnx");
+            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "yolo11n-face.onnx");
         }
         if (!File.Exists(modelPath))
         {
-            throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出 YOLO 模型", modelPath);
+            throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出人脸检测模型", modelPath);
         }
 
-        _session = new InferenceSession(modelPath, onnxOptions.Value.Yolo);
+        _session = new InferenceSession(modelPath, onnxOptions.Value.Face);
     }
 
     /// <summary>
-    /// 检测图像中的人物，返回边界框列表
+    /// 检测图像中的人脸，返回边界框列表（坐标相对于输入图像）
     /// </summary>
     /// <param name="image">输入 RGB 图像</param>
-    /// <returns>人物边界框列表（每个元素包含矩形框和置信度），无人时返回空列表</returns>
-    public List<(Rectangle Bbox, float Confidence)> DetectPersons(Image<Rgb24> image)
+    /// <returns>人脸边界框列表（每个元素包含矩形框和置信度），无人脸时返回空列表</returns>
+    public List<(Rectangle Bbox, float Confidence)> Detect(Image<Rgb24> image)
     {
         var sw = Stopwatch.StartNew();
 
@@ -71,27 +71,22 @@ public sealed class YoloDetector : IDisposable
             using var results = _session.Run([NamedOnnxValue.CreateFromTensor("images", inputTensor)]);
 
             // 4. 解析输出
-            // YOLOv11 输出 shape: [1, 84, 8400]
-            // 84 = 4(cx,cy,w,h) + 80(COCO class scores)，只读取人物(class=0)的分数
-            // Detect head 已内嵌 sigmoid(cls) + decode_bboxes(xywh) * strides
-            // bbox 四通道为像素坐标 (0-640)，cls 已过 sigmoid
             var outputTensor = (DenseTensor<float>)results[0].AsTensor<float>();
             var outputSpan = outputTensor.Buffer.Span;
             var dims = outputTensor.Dimensions;
             int numDetections = dims[2];
-            int stride = numDetections; // 每个通道的步长
+            int stride = numDetections;
 
-            // 5. 框解码 + 置信度过滤（使用临时列表）
+            // 5. 框解码 + 置信度过滤
             var candidates = new List<(float X, float Y, float W, float H, float Score)>(numDetections);
 
-            // letterbox 参数必须与 LetterboxResize 保持一致
             float scale = Math.Min((float)InputSize / image.Width, (float)InputSize / image.Height);
             float padX = (InputSize - (int)(image.Width * scale)) / 2f;
             float padY = (InputSize - (int)(image.Height * scale)) / 2f;
 
             for (int i = 0; i < numDetections; i++)
             {
-                // 只检查人物类别（class 0）的置信度
+                // 人脸只有类别 0，直接读取分数
                 float score = outputSpan[4 * stride + i];
                 if (score < ConfidenceThreshold)
                     continue;
@@ -123,20 +118,99 @@ public sealed class YoloDetector : IDisposable
                 float boxW = Math.Max(0, x2 - x1);
                 float boxH = Math.Max(0, y2 - y1);
 
-                candidates.Add((
-                    x1,
-                    y1,
-                    boxW,
-                    boxH,
-                    score
-                ));
+                candidates.Add((x1, y1, boxW, boxH, score));
             }
 
             // 6. NMS
             var resultsList = Nms(candidates);
 
-            Log.YoloDetectionCompleted(_logger, resultsList.Count, sw.Elapsed.TotalMilliseconds);
+            Log.FaceDetectionCompleted(_logger, resultsList.Count, sw.Elapsed.TotalMilliseconds);
             return resultsList;
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(pixelData);
+        }
+    }
+
+    /// <summary>
+    /// 检测图像中的最佳人脸，返回映射到原始图像坐标的 FaceDetection
+    /// </summary>
+    /// <param name="image">裁剪后的子图像（人物框内区域）</param>
+    /// <param name="offsetX">子图像在原图中的 X 偏移量</param>
+    /// <param name="offsetY">子图像在原图中的 Y 偏移量</param>
+    /// <returns>最佳人脸检测结果，无人脸时返回 null</returns>
+    public FaceDetection? DetectBestFace(Image<Rgb24> image, int offsetX, int offsetY)
+    {
+        var sw = Stopwatch.StartNew();
+
+        // 1. Letterbox resize
+        using var resized = ImageProcessor.LetterboxResize(image, InputSize);
+
+        // 2. 构建 CHW tensor
+        int bufferSize = 3 * InputSize * InputSize;
+        float[] pixelData = ArrayPool<float>.Shared.Rent(bufferSize);
+        try
+        {
+            ImageProcessor.NormalizeToTensor(resized, pixelData);
+            var inputTensor = new DenseTensor<float>(pixelData.AsMemory(0, bufferSize), [1, 3, InputSize, InputSize]);
+
+            // 3. ONNX 推理
+            using var results = _session.Run([NamedOnnxValue.CreateFromTensor("images", inputTensor)]);
+
+            // 4. 在原始输出中找最高分人脸（跳过 NMS）
+            var outputTensor = (DenseTensor<float>)results[0].AsTensor<float>();
+            var outputSpan = outputTensor.Buffer.Span;
+            int numDetections = outputTensor.Dimensions[2];
+            int stride = numDetections;
+
+            float scale = Math.Min((float)InputSize / image.Width, (float)InputSize / image.Height);
+            float padX = (InputSize - (int)(image.Width * scale)) / 2f;
+            float padY = (InputSize - (int)(image.Height * scale)) / 2f;
+
+            float bestScore = 0;
+            float bestX = 0, bestY = 0, bestW = 0, bestH = 0;
+
+            for (int i = 0; i < numDetections; i++)
+            {
+                float score = outputSpan[4 * stride + i];
+                if (score <= bestScore)
+                    continue;
+
+                // 反 letterbox + clamp 只对当前候选框做
+                float cx = outputSpan[0 * stride + i];
+                float cy = outputSpan[1 * stride + i];
+                float bw = outputSpan[2 * stride + i];
+                float bh = outputSpan[3 * stride + i];
+
+                float x1 = Math.Clamp((cx - bw / 2f - padX) / scale, 0f, image.Width);
+                float y1 = Math.Clamp((cy - bh / 2f - padY) / scale, 0f, image.Height);
+                float x2 = Math.Clamp((cx + bw / 2f - padX) / scale, 0f, image.Width);
+                float y2 = Math.Clamp((cy + bh / 2f - padY) / scale, 0f, image.Height);
+
+                bestScore = score;
+                bestX = x1;
+                bestY = y1;
+                bestW = Math.Max(0, x2 - x1);
+                bestH = Math.Max(0, y2 - y1);
+            }
+
+            if (bestScore < ConfidenceThreshold)
+            {
+                Log.BestFaceNotFound(_logger, sw.Elapsed.TotalMilliseconds);
+                return null;
+            }
+
+            Log.BestFaceDetected(_logger, bestScore, sw.Elapsed.TotalMilliseconds);
+            return new FaceDetection(
+                new BoundingBox(
+                    offsetX + (int)bestX,
+                    offsetY + (int)bestY,
+                    (int)bestW,
+                    (int)bestH
+                ),
+                bestScore
+            );
         }
         finally
         {
@@ -162,7 +236,6 @@ public sealed class YoloDetector : IDisposable
                 continue;
 
             var (x1, y1, w1, h1, score) = candidates[i];
-            // 跳过无效框（宽度或高度非正数）
             if (w1 <= 0 || h1 <= 0)
                 continue;
 

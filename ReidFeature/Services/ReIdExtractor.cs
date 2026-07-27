@@ -1,9 +1,13 @@
+using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using ReidFeature.Helpers;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace ReidFeature.Services;
 
@@ -14,12 +18,16 @@ public sealed class ReIdExtractor : IDisposable
 {
     private readonly ILogger<ReIdExtractor> _logger;
     private readonly InferenceSession _session;
-    private readonly float[] _pixelBuffer = new float[3 * InputHeight * InputWidth];
 
     private const int InputHeight = 256;
     private const int InputWidth = 128;
 
-    public ReIdExtractor(ILogger<ReIdExtractor> logger)
+    /// <summary>
+    /// 初始化 ReID 特征提取器，加载 ONNX 模型
+    /// </summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="onnxOptions">ONNX Runtime 配置</param>
+    public ReIdExtractor(ILogger<ReIdExtractor> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
 
@@ -34,16 +42,7 @@ public sealed class ReIdExtractor : IDisposable
             throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出 ReID 模型", modelPath);
         }
 
-        _logger.LogInformation("加载 ReID 模型: {Path}", modelPath);
-        var opts = new Microsoft.ML.OnnxRuntime.SessionOptions
-        {
-            IntraOpNumThreads = 1,
-            InterOpNumThreads = 1,
-            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
-        };
-        _session = new InferenceSession(modelPath, opts);
-        _logger.LogInformation("ReID 模型加载完成");
+        _session = new InferenceSession(modelPath, onnxOptions.Value.ReId);
     }
 
     /// <summary>
@@ -61,39 +60,45 @@ public sealed class ReIdExtractor : IDisposable
 
         // 2. 构建 CHW tensor（原始像素值 [0,1]，mean/std 由 ONNX 图内嵌处理）
         int h = resized.Height, w = resized.Width;
-        resized.ProcessPixelRows(accessor =>
+        int bufferSize = 3 * h * w;
+        float[] pixelBuffer = ArrayPool<float>.Shared.Rent(bufferSize);
+        try
         {
-            for (int y = 0; y < h; y++)
+            resized.ProcessPixelRows(accessor =>
             {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < w; x++)
+                for (int y = 0; y < h; y++)
                 {
-                    var p = row[x];
-                    int idx = y * w + x;
-                    _pixelBuffer[idx] = p.R / 255f;
-                    _pixelBuffer[h * w + idx] = p.G / 255f;
-                    _pixelBuffer[2 * h * w + idx] = p.B / 255f;
+                    var row = accessor.GetRowSpan(y);
+                    for (int x = 0; x < w; x++)
+                    {
+                        var p = row[x];
+                        int idx = y * w + x;
+                        pixelBuffer[idx] = p.R / 255f;
+                        pixelBuffer[h * w + idx] = p.G / 255f;
+                        pixelBuffer[2 * h * w + idx] = p.B / 255f;
+                    }
                 }
-            }
-        });
-        var inputTensor = new DenseTensor<float>(_pixelBuffer, [1, 3, InputHeight, InputWidth]);
+            });
+            var inputTensor = new DenseTensor<float>(pixelBuffer.AsMemory(0, bufferSize), [1, 3, InputHeight, InputWidth]);
 
-        // 3. ONNX 推理
-        using var results = _session.Run([NamedOnnxValue.CreateFromTensor("input", inputTensor)]);
+            // 3. ONNX 推理
+            using var results = _session.Run([NamedOnnxValue.CreateFromTensor("input", inputTensor)]);
 
-        // 4. 输出解析 — 特征向量
-        var floats = results[0].AsTensor<float>().ToArray();
-        int featureDim = floats.Length;
+            // 4. 输出解析 — 特征向量（通过 DenseTensor.Buffer 直接零拷贝输出）
+            var resultTensor = (DenseTensor<float>)results[0].AsTensor<float>();
 
-        _logger.LogInformation("ReID 特征: dim={Dim}, 耗时 {Elapsed:F1}ms",
-            featureDim, sw.Elapsed.TotalMilliseconds);
-
-        var bytes = new byte[floats.Length * 4];
-        Buffer.BlockCopy(floats, 0, bytes, 0, bytes.Length);
-        return bytes;
+            Log.ReIdFeatureExtracted(_logger, resultTensor.Length, sw.Elapsed.TotalMilliseconds);
+            return MemoryMarshal.Cast<float, byte>(resultTensor.Buffer.Span).ToArray();
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(pixelBuffer);
+        }
     }
 
-
+    /// <summary>
+    /// 释放 ONNX Runtime 会话
+    /// </summary>
     public void Dispose()
     {
         _session?.Dispose();
