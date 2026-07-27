@@ -102,7 +102,7 @@ public static class DetectHandler
     }
 
     /// <summary>
-    /// 处理检测请求：上传 H264 裸流帧，解码后检测
+    /// 处理检测请求：上传 H264 裸流帧，边解码边检测
     /// </summary>
     /// <param name="context">HTTP 上下文</param>
     /// <param name="detectService">检测编排服务</param>
@@ -122,7 +122,7 @@ public static class DetectHandler
     }
 
     /// <summary>
-    /// 处理检测请求：上传 H265 裸流帧，解码后检测
+    /// 处理检测请求：上传 H265 裸流帧，边解码边检测
     /// </summary>
     /// <param name="context">HTTP 上下文</param>
     /// <param name="detectService">检测编排服务</param>
