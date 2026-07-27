@@ -36,6 +36,7 @@ namespace ReidFeature
             builder.Services.AddSingleton<ReIdExtractor>();
             builder.Services.AddSingleton<FaceDetector>();
             builder.Services.AddSingleton<DetectService>();
+            builder.Services.AddSingleton<IPersonGroupProvider, MockPersonGroupProvider>();
 
             builder.Services.AddHttpClient();
 
@@ -67,6 +68,10 @@ namespace ReidFeature
 
             app.MapPost("/detect/h265stream", DetectHandler.HandleH265StreamAsync)
                .WithName("DetectH265Stream")
+               .Accepts<byte[]>("application/octet-stream");
+
+            app.MapPost("/recognize/image/{groupId}", RecognizeHandler.HandleImageAsync)
+               .WithName("RecognizeImage")
                .Accepts<byte[]>("application/octet-stream");
 
             app.Run();
