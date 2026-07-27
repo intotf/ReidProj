@@ -74,6 +74,17 @@ namespace ReidFeature
                .WithName("RecognizeImage")
                .Accepts<byte[]>("application/octet-stream");
 
+            app.MapPost("/recognize/imageurl/{groupId}", RecognizeHandler.HandleImageUrlAsync)
+               .WithName("RecognizeImageUrl");
+
+            app.MapPost("/recognize/h264stream/{groupId}", RecognizeHandler.HandleH264StreamAsync)
+               .WithName("RecognizeH264Stream")
+               .Accepts<byte[]>("application/octet-stream");
+
+            app.MapPost("/recognize/h265stream/{groupId}", RecognizeHandler.HandleH265StreamAsync)
+               .WithName("RecognizeH265Stream")
+               .Accepts<byte[]>("application/octet-stream");
+
             app.Run();
         }
     }
