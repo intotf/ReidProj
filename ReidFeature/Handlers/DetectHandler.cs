@@ -107,7 +107,7 @@ public static class DetectHandler
     /// <param name="context">HTTP 上下文</param>
     /// <param name="detectService">检测编排服务</param>
     /// <param name="logger">日志记录器</param>
-    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）；≤0 时解码输入流的所有帧</param>
     /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停)</param>
     /// <param name="cancellationToken">取消令牌</param>
     public static IAsyncEnumerable<PersonDetection> HandleH264StreamAsync(
@@ -127,7 +127,7 @@ public static class DetectHandler
     /// <param name="context">HTTP 上下文</param>
     /// <param name="detectService">检测编排服务</param>
     /// <param name="logger">日志记录器</param>
-    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）；≤0 时解码输入流的所有帧</param>
     /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停)</param>
     /// <param name="cancellationToken">取消令牌</param>
     public static IAsyncEnumerable<PersonDetection> HandleH265StreamAsync(
@@ -148,7 +148,7 @@ public static class DetectHandler
     /// <param name="detectService">检测编排服务</param>
     /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停)</param>
     /// <param name="codec">视频编码格式。可取值: 0=H264(原始 H264 裸流 Annex B), 1=H265(原始 H265/HEVC 裸流)</param>
-    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）；≤0 时解码输入流的所有帧</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="cancellationToken">取消令牌</param>
     private static async IAsyncEnumerable<PersonDetection> HandleVideoAsync(

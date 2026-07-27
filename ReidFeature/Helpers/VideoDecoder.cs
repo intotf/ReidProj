@@ -99,31 +99,34 @@ static class VideoDecoder
             throw new FileNotFoundException("找不到 ffmpeg，请确认 ffmpeg 已放置在 tools 目录", ffmpegPath);
         }
 
-        var format = codec.ToFfmpegFormat();
-        // 帧间隔 → ffmpeg -r 参数（帧率 = 1 / 间隔秒数）
-        var fps = 1d / frameIntervalSeconds;
-        var process = new Process
+        var startInfo = new ProcessStartInfo
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = ffmpegPath,
-                ArgumentList =
-                {
-                    "-f", format,
-                    "-i", "pipe:0",
-                    "-f", "image2pipe",
-                    "-c:v", "bmp",
-                    "-r", fps.ToString("F6"),
-                    "-y",
-                    "pipe:1"
-                },
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            }
+            FileName = ffmpegPath,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
         };
 
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add(codec.ToFfmpegFormat());
+        startInfo.ArgumentList.Add("-i");
+        startInfo.ArgumentList.Add("pipe:0");
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("image2pipe");
+        startInfo.ArgumentList.Add("-c:v");
+        startInfo.ArgumentList.Add("bmp");
+
+        if (frameIntervalSeconds > 0)
+        {
+            startInfo.ArgumentList.Add("-r");
+            startInfo.ArgumentList.Add((1d / frameIntervalSeconds).ToString("F6"));
+        }
+
+        startInfo.ArgumentList.Add("-y");
+        startInfo.ArgumentList.Add("pipe:1");
+
+        var process = new Process { StartInfo = startInfo };
         process.Start();
         return process;
     }
