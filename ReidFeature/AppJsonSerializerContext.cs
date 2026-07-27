@@ -1,4 +1,5 @@
 using ReidFeature.Payloads;
+using ReidFeature.Services;
 using System.Text.Json.Serialization;
 
 namespace ReidFeature
@@ -6,6 +7,8 @@ namespace ReidFeature
     [JsonSerializable(typeof(IAsyncEnumerable<PersonDetection>))]
     [JsonSerializable(typeof(DetectionFlags))]
     [JsonSerializable(typeof(UrlDetectRequest))]
+    [JsonSerializable(typeof(Person[]))]
+    [JsonSerializable(typeof(IAsyncEnumerable<PersonRecognition>))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
 

@@ -9,7 +9,7 @@
 		<RootNamespace>ReidFeature</RootNamespace>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<AllowUnsafeBlocks>false</AllowUnsafeBlocks>
-		<RuntimeIdentifier>win-x64</RuntimeIdentifier> 
+		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -33,6 +33,13 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="tools\" />
-	</ItemGroup> 
+		<Folder Include="datas\" />
+		<Folder Include="tools\" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="datas\**">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
 </Project>
