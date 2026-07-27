@@ -30,5 +30,9 @@
 		<Content Include="tools\ffmpeg.exe" Condition="Exists('tools\ffmpeg.exe') and $(RuntimeIdentifier.StartsWith('win'))">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</Content>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="tools\" />
 	</ItemGroup> 
 </Project>
