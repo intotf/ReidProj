@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "ReIdMp4Cli": {
+        "commandName": "Project",
+        "commandLineArgs": "\"G:\\ReIdTest\\videos\\D20260727T084931Z04090D03050C0900_M11.mp4\" group2 --server-url http://localhost:9000 --threshold 0.35 --flags 0"
+    }
+  }
+}
