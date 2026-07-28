@@ -1,4 +1,4 @@
-﻿namespace ReidFeature.Services
+﻿namespace ReidFeature.Payloads
 {
     /// <summary>
     /// 人物识别结果
