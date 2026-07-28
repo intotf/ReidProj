@@ -57,17 +57,17 @@ public sealed class FaceDetector : IDisposable
     /// </summary>
     /// <param name="logger">日志记录器</param>
     /// <param name="onnxOptions">ONNX Runtime 会话配置</param>
-    /// <exception cref="FileNotFoundException">models/scrfd_10g.onnx 未找到时抛出</exception>
+    /// <exception cref="FileNotFoundException">models/det_10g.onnx 未找到时抛出</exception>
     public FaceDetector(ILogger<FaceDetector> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
 
         // 搜索模型文件路径（输出目录 → 项目目录）
-        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "scrfd_10g.onnx");
+        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "det_10g.onnx");
         if (!File.Exists(modelPath))
-            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "scrfd_10g.onnx");
+            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "det_10g.onnx");
         if (!File.Exists(modelPath))
-            throw new FileNotFoundException("请先将 scrfd_10g.onnx 放到 models/ 目录下", modelPath);
+            throw new FileNotFoundException("请先将 det_10g.onnx 放到 models/ 目录下", modelPath);
 
         _session = new InferenceSession(modelPath, onnxOptions.Value.Face);
 

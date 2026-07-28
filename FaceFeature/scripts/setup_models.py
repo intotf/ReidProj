@@ -6,7 +6,7 @@ setup_models.py — 人脸模型下载脚本（FaceFeature 专用）
     python scripts/setup_models.py
 
 输出:
-    models/scrfd_10g.onnx       — SCRFD-10g 人脸检测模型
+    models/det_10g.onnx       — SCRFD-10g 人脸检测模型
     models/w600k_r50.onnx       — ArcFace 人脸特征提取模型
 """
 import os
@@ -25,7 +25,7 @@ def log(msg: str):
 
 
 def export_models():
-    face_onnx = MODELS_DIR / "scrfd_10g.onnx"
+    face_onnx = MODELS_DIR / "det_10g.onnx"
     face_rec_onnx = MODELS_DIR / "w600k_r50.onnx"
     if face_onnx.exists() and face_rec_onnx.exists():
         log(f"✅ 人脸模型已存在，跳过")
@@ -47,7 +47,6 @@ def export_models():
         log("从 zip 中提取 w600k_r50.onnx ...")
         zf.extract("w600k_r50.onnx", MODELS_DIR)
 
-    (MODELS_DIR / "det_10g.onnx").rename(face_onnx)
     log(f"✅ SCRFD-10g ONNX 已就绪: {face_onnx} ({round(face_onnx.stat().st_size / 1024 / 1024, 1)} MB)")
 
     rec_size_mb = round(face_rec_onnx.stat().st_size / 1024 / 1024, 1)
@@ -60,7 +59,7 @@ def main():
 
     log("=" * 60)
     log("🎉 全部完成！")
-    log(f"   - {MODELS_DIR / 'scrfd_10g.onnx'}")
+    log(f"   - {MODELS_DIR / 'det_10g.onnx'}")
     log(f"   - {MODELS_DIR / 'w600k_r50.onnx'}")
     log("=" * 60)
 
