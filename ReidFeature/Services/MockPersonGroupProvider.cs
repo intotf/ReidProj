@@ -22,7 +22,7 @@ namespace ReidFeature.Services
                     foreach (var imageFile in Directory.GetFiles(personDir, "*.*"))
                     {
                         using var image = Image.Load<Rgb24>(imageFile);
-                        var personId = Path.GetFileNameWithoutExtension(imageFile);
+                        var personId = Path.GetFileName(imageFile);
                         foreach (var detection in detectService.DetectPersons(image, DetectionFlags.All))
                         {
                             var person = new Person(personId, groupId, personName, detection.Face?.Features, detection.Features);
