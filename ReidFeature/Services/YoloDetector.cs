@@ -24,9 +24,9 @@ public sealed class YoloDetector : IDisposable
     private const float NmsThreshold = 0.45f;
     private const float ConfidenceThreshold = 0.20f;
 
-    // ImageNet 标准化参数（YOLO 训练集预处理）
-    private static readonly float[] Mean = [0.485f, 0.456f, 0.406f];
-    private static readonly float[] Std = [0.229f, 0.224f, 0.225f];
+    // YOLO 预处理：像素值归一化到 [0,1]（不做 ImageNet 标准化，与 Ultralytics 默认一致）
+    private static readonly float[] Mean = [0f, 0f, 0f];
+    private static readonly float[] Std = [1f, 1f, 1f];
 
     /// <summary>
     /// 初始化 YOLO 人物检测器，加载 ONNX 模型
