@@ -1,5 +1,4 @@
 using FaceFeature.Helpers;
-using FaceFeature.Payloads;
 using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -19,26 +18,37 @@ public sealed class FaceDetector : IDisposable
 {
     /// <summary>SCRFD 模型期望的输入图像尺寸（宽高均为 640）</summary>
     private const int InputSize = 640;
+
     /// <summary>NMS 去重的 IoU 阈值</summary>
     private const float NmsThreshold = 0.4f;
+
     /// <summary>人脸置信度过滤阈值</summary>
     private const float ConfidenceThreshold = 0.6f;
+
     /// <summary>人脸最小尺寸（像素），低于此值的人脸特征不可靠，将被忽略</summary>
     private const int MinFaceSize = 50;
+
     /// <summary>SCRFD 预处理的像素均值</summary>
     private const float ScrfdMean = 127.5f;
+
     /// <summary>SCRFD 预处理的像素标准差</summary>
     private const float ScrfdStd = 128f;
+
     /// <summary>Letterbox 填充色（黑色）</summary>
     private static readonly Rgb24 PadColor = new(0, 0, 0);
 
     private readonly ILogger<FaceDetector> _logger;
+
     /// <summary>ONNX Runtime 推理会话</summary>
     private readonly InferenceSession _session;
+
+
     /// <summary>特征金字塔的层数（3 或 5），由模型输出的张量数量决定</summary>
     private readonly int _fmc;
+
     /// <summary>每像素锚点数（2 或 1），由模型输出的张量数量决定</summary>
     private readonly int _numAnchors;
+
     /// <summary>各特征图的下采样步长（如 [8, 16, 32]）</summary>
     private readonly int[] _strides;
 
