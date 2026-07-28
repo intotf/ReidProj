@@ -370,3 +370,4 @@ FodyWeavers.xsd
 /ReidFeature/tools/ffmpeg
 /ReidFeature/tools/ffmpeg.exe
 /ReidFeature/scripts/.venv_scrfd
+/FaceFeature/tools/ffmpeg
