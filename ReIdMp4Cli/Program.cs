@@ -3,34 +3,51 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ReIdMp4Cli;
 
 Console.OutputEncoding = Encoding.UTF8;
 
-// ── 解析命令行参数 ─────────────────────────────────
-if (args.Length < 2)
+// ── 加载配置文件 ─────────────────────────────────
+var config = LoadConfig();
+if (config == null)
 {
-    Console.WriteLine("用法: ReIdMp4Cli <mp4文件路径> <分组ID> [选项]");
+    Console.Error.WriteLine("错误: 无法加载 appsettings.json 配置文件");
+    return 1;
+}
+
+// ── 解析命令行参数 ─────────────────────────────────
+if (args.Length < 1)
+{
+    Console.WriteLine("用法: ReIdMp4Cli <mp4文件路径> [分组ID] [选项]");
+    Console.WriteLine();
+    Console.WriteLine("参数:");
+    Console.WriteLine("  <mp4文件路径>           待识别的 MP4 视频绝对路径");
+    Console.WriteLine("  [分组ID]                人物分组标识 (默认: {0})", config.DefaultGroupId);
     Console.WriteLine();
     Console.WriteLine("选项:");
-    Console.WriteLine("  --server-url <url>       ReidFeature 服务地址 (默认: http://localhost:9000)");
-    Console.WriteLine("  --threshold <float>      相似度阈值 (默认: 0.9)");
-    Console.WriteLine("  --flags <int>            检测标志位: 0=All, 1=SkipFaceDetection, 2=StopOnFirstFrameHit (默认: 0)");
-    Console.WriteLine("  --ffmpeg-path <path>     ffmpeg 可执行文件路径 (默认: 自动从 PATH 查找)");
+    Console.WriteLine("  --server-url <url>       ReidFeature 服务地址 (默认: {0})", config.ServerUrl);
+    Console.WriteLine("  --threshold <float>      相似度阈值 (默认: {0})", config.Threshold);
+    Console.WriteLine("  --flags <int>            检测标志位: 0=All, 1=SkipFaceDetection, 2=StopOnFirstFrameHit (默认: {0})", config.Flags);
+    Console.WriteLine("  --ffmpeg-path <path>     ffmpeg 可执行文件路径 (默认: {0} 或 PATH)", string.IsNullOrEmpty(config.FfmpegPath) ? "自动查找" : config.FfmpegPath);
     Console.WriteLine();
-    Console.WriteLine("示例: ReIdMp4Cli \"D:\\Videos\\test.mp4\" group2 --server-url http://192.168.1.100:9000");
+    Console.WriteLine("示例:");
+    Console.WriteLine("  ReIdMp4Cli \"D:\\Videos\\test.mp4\"");
+    Console.WriteLine("  ReIdMp4Cli \"D:\\Videos\\test.mp4\" family01 --server-url http://192.168.1.100:5000");
     return 1;
 }
 
 var mp4Path = args[0];
-var groupId = args[1];
+var groupId = args.Length >= 2 && !args[1].StartsWith("--") ? args[1] : config.DefaultGroupId;
 
-// 解析命名参数
-var serverUrl = "http://localhost:9000";
-var threshold = 0.9f;
-var flags = 0;
-var ffmpegPath = FindFfmpeg();
+// 解析命名参数（groupId 占 args[1] 时从 2 开始，否则从 1 开始）
+var namedStartIndex = args.Length >= 2 && !args[1].StartsWith("--") ? 2 : 1;
+var serverUrl = config.ServerUrl;
+var threshold = config.Threshold;
+var flags = config.Flags;
+var ffmpegPath = !string.IsNullOrEmpty(config.FfmpegPath) ? config.FfmpegPath : FindFfmpeg();
+var ffmpegArgsTemplate = config.FfmpegArgs;
 
-for (int i = 2; i < args.Length; i++)
+for (int i = namedStartIndex; i < args.Length; i++)
 {
     if (args[i] == "--server-url" && i + 1 < args.Length)
         serverUrl = args[++i];
@@ -77,7 +94,7 @@ Directory.CreateDirectory(tempDir);
 try
 {
     Console.WriteLine("[1/3] 抽帧...");
-    var frameCount = await ExtractFramesAsync(ffmpegPath, mp4Path, tempDir);
+    var frameCount = await ExtractFramesAsync(ffmpegPath, mp4Path, tempDir, ffmpegArgsTemplate);
     if (frameCount == 0)
     {
         Console.Error.WriteLine("错误: 未抽到任何帧");
@@ -163,14 +180,17 @@ finally
 // ═══════════════════════════════════════════════
 
 /// <summary>
-/// 使用 ffmpeg 按 1 fps 抽取帧到临时目录
+/// 使用 ffmpeg 抽取帧到临时目录
 /// </summary>
-static async Task<int> ExtractFramesAsync(string ffmpegPath, string inputVideo, string outputDir)
+static async Task<int> ExtractFramesAsync(string ffmpegPath, string inputVideo, string outputDir, string argsTemplate)
 {
     var outputPattern = Path.Combine(outputDir, "frame_%04d.jpg");
+    var arguments = argsTemplate
+        .Replace("{inputVideo}", inputVideo)
+        .Replace("{outputPattern}", outputPattern);
     var psi = new ProcessStartInfo(ffmpegPath)
     {
-        Arguments = $"-i \"{inputVideo}\" -vf fps=1 -q:v 2 \"{outputPattern}\"",
+        Arguments = arguments,
         RedirectStandardOutput = true,
         RedirectStandardError = true,
         UseShellExecute = false,
@@ -233,6 +253,36 @@ static string? FindFfmpeg()
 }
 
 /// <summary>
+/// 加载 appsettings.json 配置文件
+/// </summary>
+static AppConfig? LoadConfig()
+{
+    var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+    if (!File.Exists(configPath))
+    {
+        configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
+    }
+    if (!File.Exists(configPath))
+    {
+        return null;
+    }
+    try
+    {
+        var json = File.ReadAllText(configPath);
+        var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.TryGetProperty("AppConfig", out var section))
+        {
+            return JsonSerializer.Deserialize(section, AppJsonContext.Default.AppConfig);
+        }
+        return JsonSerializer.Deserialize(json, AppJsonContext.Default.AppConfig);
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+/// <summary>
 /// /recognize/image/{groupId} 返回的识别结果 DTO
 /// </summary>
 public class PersonRecognition
@@ -249,5 +299,6 @@ public class PersonRecognition
 /// </summary>
 [JsonSerializable(typeof(PersonRecognition))]
 [JsonSerializable(typeof(List<PersonRecognition>))]
+[JsonSerializable(typeof(AppConfig))]
 [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]
 internal partial class AppJsonContext : JsonSerializerContext;
