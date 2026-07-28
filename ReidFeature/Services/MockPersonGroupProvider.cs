@@ -19,14 +19,14 @@ namespace ReidFeature.Services
                 foreach (var personDir in Directory.GetDirectories(groupDir))
                 {
                     var personId = Path.GetFileName(personDir);
-                    var reidFeatures = new List<byte[]>();
+                    var reidFeatures = new Dictionary<string, byte[]>();
 
                     foreach (var imageFile in Directory.GetFiles(personDir, "*.*"))
                     {
                         using var image = Image.Load<Rgb24>(imageFile);
                         foreach (var detection in detectService.DetectPersons(image, DetectionFlags.All))
                         {
-                            reidFeatures.Add(detection.Features);
+                            reidFeatures[Path.GetFileName(imageFile)] = detection.Features;
                             break;
                         }
                     }
@@ -34,8 +34,9 @@ namespace ReidFeature.Services
                     var person = new Person(personId, groupId, personId, reidFeatures);
                     personList.Add(person);
                 }
-
+				
                 groups[groupId] = personList.ToArray();
+				
             }
 
             _groups = groups;

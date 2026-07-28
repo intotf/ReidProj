@@ -20,20 +20,20 @@ public class ReidFeatureClient : IDisposable
     }
 
     /// <summary>
-    /// 发送图片到 /detect 接口，返回检测到的人物及其特征向量
+    /// 发送图片到 /detect/image 接口，返回检测到的人物及其特征向量
     /// </summary>
     public async Task<List<PersonDetection>> DetectAsync(byte[] imageBytes, CancellationToken ct = default)
     {
         using var content = new ByteArrayContent(imageBytes);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
-        var response = await _httpClient.PostAsync("/detect", content, ct);
+        var response = await _httpClient.PostAsync("/detect/image?flags=0", content, ct);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(ct);
-        var result = JsonSerializer.Deserialize(json, AppJsonContext.Default.DetectResponse);
+        var result = JsonSerializer.Deserialize(json, AppJsonContext.Default.ListPersonDetection);
 
-        return result?.Persons ?? [];
+        return result ?? [];
     }
 
     public void Dispose()

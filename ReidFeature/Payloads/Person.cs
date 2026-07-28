@@ -24,7 +24,10 @@ namespace ReidFeature.Payloads
         /// <summary>
         /// 人物特征向量
         /// </summary>
-        public List<byte[]> ReidFeatures { get; set; } = [];
+        /// <summary>
+        /// 人物特征向量集合（key = 来源文件名, value = 特征向量）
+        /// </summary>
+        public Dictionary<string, byte[]> ReidFeatures { get; set; } = [];
 
         /// <summary>
         /// 人物信息
@@ -32,8 +35,8 @@ namespace ReidFeature.Payloads
         /// <param name="id">人物 ID</param>
         /// <param name="groupId">所在分组 ID</param>
         /// <param name="name">人物名称</param>
-        /// <param name="reidFeatures">人物特征向量</param>
-        public Person(string id, string groupId, string name, List<byte[]> reidFeatures)
+        /// <param name="reidFeatures">人物特征向量（key = 来源文件名）</param>
+        public Person(string id, string groupId, string name, Dictionary<string, byte[]> reidFeatures)
         {
             Id = id;
             GroupId = groupId;
@@ -45,19 +48,21 @@ namespace ReidFeature.Payloads
         /// 计算给定特征向量与人物所有特征向量的最大余弦相似度
         /// </summary>
         /// <param name="features">要比较的特征向量</param>
-        /// <returns>最大余弦相似度</returns>
-        public float ReidSimilarity(ReadOnlySpan<byte> features)
+        /// <returns>最大余弦相似度及匹配来源文件名</returns>
+        public (float Similarity, string? SourceFile) ReidSimilarity(ReadOnlySpan<byte> features)
         {
             float maxSimilarity = 0f;
-            foreach (var reidFeature in this.ReidFeatures)
+            string? bestSourceFile = null;
+            foreach (var (sourceFile, reidFeature) in this.ReidFeatures)
             {
                 var similarity = CosineSimilarity(features, reidFeature);
                 if (similarity > maxSimilarity)
                 {
                     maxSimilarity = similarity;
+                    bestSourceFile = sourceFile;
                 }
             }
-            return maxSimilarity;
+            return (maxSimilarity, bestSourceFile);
         }
 
 

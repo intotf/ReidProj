@@ -150,7 +150,7 @@ namespace ReidFeature.Handlers
             await foreach (var detection in detections.WithCancellation(cancellationToken))
             {
                 var bestMatch = persons
-                    .Select(p => new { Person = p, Similarity = p.ReidSimilarity(detection.Features) })
+                    .Select(p => { var (sim, src) = p.ReidSimilarity(detection.Features); return new { Person = p, Similarity = sim, SourceFile = src }; })
                     .MaxBy(p => p.Similarity);
 
                 if (bestMatch != null && bestMatch.Similarity >= similarityThreshold)
@@ -159,7 +159,8 @@ namespace ReidFeature.Handlers
                         bestMatch.Person.Id,
                         bestMatch.Person.GroupId,
                         bestMatch.Person.Name,
-                        bestMatch.Similarity);
+                        bestMatch.Similarity,
+                        bestMatch.SourceFile);
                 }
             }
         }

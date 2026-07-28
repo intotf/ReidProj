@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="ReidFeature/ReidFeature.csproj" />
+  <Project Path="ReIdMp4Cli/ReIdMp4Cli.csproj" />
   <Project Path="ReidSample/ReIdSample.csproj" />
   <Project Path="ReIdCli/ReIdCli.csproj" />
 </Solution>

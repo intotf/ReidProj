@@ -25,18 +25,15 @@ public class MatchResult
 }
 
 /// <summary>
-/// /detect 接口返回的检测结果
+/// /detect/image 接口返回的单个人物检测结果
 /// </summary>
-public class DetectResponse
-{
-    public List<PersonDetection> Persons { get; set; } = [];
-}
-
 public class PersonDetection
 {
+    public int FrameIndex { get; set; }
     public BoundingBox Bbox { get; set; } = null!;
     public float Confidence { get; set; }
     public byte[] Features { get; set; } = [];
+    public FaceDetection? Face { get; set; }
 }
 
 public class BoundingBox
@@ -47,9 +44,15 @@ public class BoundingBox
     public int Height { get; set; }
 }
 
+public class FaceDetection
+{
+    public BoundingBox Bbox { get; set; } = null!;
+    public float Confidence { get; set; }
+}
+
 /// <summary>
 /// AOT 兼容的 JSON 序列化上下文
 /// </summary>
-[JsonSerializable(typeof(DetectResponse))]
+[JsonSerializable(typeof(List<PersonDetection>))]
 [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]
 internal partial class AppJsonContext : JsonSerializerContext;

@@ -8,6 +8,7 @@ namespace ReidFeature
     [JsonSerializable(typeof(DetectionFlags))]
     [JsonSerializable(typeof(UrlDetectRequest))]
     [JsonSerializable(typeof(Person[]))]
+    [JsonSerializable(typeof(Dictionary<string, byte[]>))]
     [JsonSerializable(typeof(IAsyncEnumerable<PersonRecognition>))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
