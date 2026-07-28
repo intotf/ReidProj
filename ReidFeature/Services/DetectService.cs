@@ -40,16 +40,22 @@ public sealed class DetectService
     /// <returns>检测到的人物列表（可能为空）</returns>
     public IEnumerable<PersonDetection> DetectPersons(Image<Rgb24> image, DetectionFlags flags, int frameIndex = 0)
     {
+#if DEBUG
         // 先收集所有检测结果
         var results = new List<PersonDetection>();
+#endif
+
         using var enumerator = RunPipeline(image, flags, frameIndex).GetEnumerator();
         while (true)
         {
-            PersonDetection item;
+            var item = default(PersonDetection);
             try
             {
                 if (!enumerator.MoveNext())
+                {
                     break;
+                }
+
                 item = enumerator.Current;
             }
             catch (Exception ex)
@@ -57,10 +63,18 @@ public sealed class DetectService
                 Log.DetectPipelineFailed(_logger, ex);
                 break;
             }
-            results.Add(item);
+
+            if (item is not null)
+            {
+#if DEBUG
+                results.Add(item);
+#endif
+                yield return item;
+            }
         }
 
         // 可视化：绘制人物框（绿色）和人脸框（红色）
+#if DEBUG
         if (results.Count > 0)
         {
             using var annotated = image.Clone();
@@ -70,8 +84,8 @@ public sealed class DetectService
             var path = Path.Combine(outDir, $"{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
             annotated.SaveAsPng(path);
         }
+#endif
 
-        return results;
     }
 
     /// <summary>
