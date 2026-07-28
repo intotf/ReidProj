@@ -369,3 +369,4 @@ FodyWeavers.xsd
 /ReidSample/reid_sample.db-wal
 /ReidFeature/tools/ffmpeg
 /ReidFeature/tools/ffmpeg.exe
+/ReidFeature/scripts/.venv_scrfd

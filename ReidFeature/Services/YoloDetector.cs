@@ -24,6 +24,10 @@ public sealed class YoloDetector : IDisposable
     private const float NmsThreshold = 0.45f;
     private const float ConfidenceThreshold = 0.20f;
 
+    // ImageNet 标准化参数（YOLO 训练集预处理）
+    private static readonly float[] Mean = [0.485f, 0.456f, 0.406f];
+    private static readonly float[] Std = [0.229f, 0.224f, 0.225f];
+
     /// <summary>
     /// 初始化 YOLO 人物检测器，加载 ONNX 模型
     /// </summary>
@@ -64,7 +68,7 @@ public sealed class YoloDetector : IDisposable
         float[] pixelData = ArrayPool<float>.Shared.Rent(bufferSize);
         try
         {
-            ImageProcessor.NormalizeToTensor(resized, pixelData);
+            NormalizeToTensor(resized, pixelData);
             var inputTensor = new DenseTensor<float>(pixelData.AsMemory(0, bufferSize), [1, 3, InputSize, InputSize]);
 
             // 3. ONNX 推理
@@ -216,5 +220,30 @@ public sealed class YoloDetector : IDisposable
     public void Dispose()
     {
         _session?.Dispose();
+    }
+
+    /// <summary>
+    /// 将 Image 类型图像归一化为模型输入的 Tensor 格式
+    /// </summary>
+    /// <param name="image">输入图像（已进行 Letterbox Resize）</param>
+    /// <param name="tensorData">预分配的浮点数数组，大小应为 3 × 640 × 640</param>
+    private static void NormalizeToTensor(Image<Rgb24> image, float[] tensorData)
+    {
+        int h = image.Height, w = image.Width;
+        image.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < h; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < w; x++)
+                {
+                    var p = row[x];
+                    int idx = y * w + x;
+                    tensorData[idx] = (p.R / 255f - Mean[0]) / Std[0];
+                    tensorData[h * w + idx] = (p.G / 255f - Mean[1]) / Std[1];
+                    tensorData[2 * h * w + idx] = (p.B / 255f - Mean[2]) / Std[2];
+                }
+            }
+        });
     }
 }
