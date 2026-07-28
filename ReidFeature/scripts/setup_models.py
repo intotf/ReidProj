@@ -8,11 +8,13 @@ setup_models.py — 完全自包含的模型下载和 ONNX 导出脚本
 输出:
     models/yolo11n.onnx        — YOLOv11n 人物检测模型
     models/reid_model.onnx      — FastReID ResNet50-IBN-a 特征提取模型
-    models/yolo11n-face.onnx    — YOLOv11n-face 人脸检测模型
+    models/scrfd_10g.onnx       — SCRFD-10g 人脸检测模型
 """
 import os
 import sys
 import subprocess
+import zipfile
+import io
 import argparse
 from pathlib import Path
 
@@ -72,26 +74,31 @@ def export_yolo():
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 3. YOLO Face → ONNX（下载预导出模型）
+# 3. SCRFD Face → ONNX（从 buffalo_l Model Pack 提取）
 # ═══════════════════════════════════════════════════════════════════
-def export_yolo_face():
-    face_onnx = MODELS_DIR / "yolo11n-face.onnx"
+def export_scrfd_face():
+    face_onnx = MODELS_DIR / "scrfd_10g.onnx"
     if face_onnx.exists():
-        log(f"✅ YOLO Face ONNX 已存在，跳过: {face_onnx}")
+        log(f"✅ SCRFD ONNX 已存在，跳过: {face_onnx}")
         return
 
     log("=" * 50)
-    log("Step 3/3: 下载 YOLOv11n-face ONNX 模型")
+    log("Step 3/3: 从 InsightFace buffalo_l 提取 SCRFD-10g ONNX")
     log("=" * 50)
 
     import urllib.request
 
-    url = ("https://github.com/akanametov/yolo-face/releases/"
-           "download/1.0.0/yolov11n-face.onnx")
-    log(f"从 GitHub Releases 下载 yolov11n-face.onnx...")
-    urllib.request.urlretrieve(url, face_onnx)
+    url = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
+    log(f"下载 buffalo_l.zip (约 84 MB)...")
+    resp = urllib.request.urlopen(url)
+    data = resp.read()
+    log(f"  下载完成 ({len(data) / 1024 / 1024:.1f} MB)")
+    log("从 zip 中提取 det_10g.onnx ...")
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        zf.extract("det_10g.onnx", MODELS_DIR)
+    (MODELS_DIR / "det_10g.onnx").rename(face_onnx)
     size_mb = round(face_onnx.stat().st_size / 1024 / 1024, 1)
-    log(f"✅ YOLOv11n-face ONNX 已下载: {face_onnx} ({size_mb} MB)")
+    log(f"✅ SCRFD-10g ONNX 已就绪: {face_onnx} ({size_mb} MB)")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -288,7 +295,7 @@ def main():
         log("跳过 ReID 导出")
 
     if not args.skip_face:
-        export_yolo_face()
+        export_scrfd_face()
     else:
         log("跳过人脸检测导出")
 
@@ -296,7 +303,7 @@ def main():
     log("🎉 全部完成！")
     log(f"   - {MODELS_DIR / 'yolo11n.onnx'}")
     log(f"   - {MODELS_DIR / 'reid_model.onnx'}")
-    log(f"   - {MODELS_DIR / 'yolo11n-face.onnx'}")
+    log(f"   - {MODELS_DIR / 'scrfd_10g.onnx'}")
     log("=" * 50)
 
 
