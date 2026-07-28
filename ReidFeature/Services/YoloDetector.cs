@@ -1,11 +1,12 @@
+using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using ReidFeature.Helpers;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
-using Microsoft.Extensions.Options;
 
 namespace ReidFeature.Services;
 
@@ -61,7 +62,7 @@ public sealed class YoloDetector : IDisposable
         var sw = Stopwatch.StartNew();
 
         // 1. Letterbox resize
-        using var resized = ImageProcessor.LetterboxResize(image, InputSize);
+        using var resized = LetterboxResize(image, InputSize);
 
         // 2. 构建 CHW tensor (3×640×640)
         int bufferSize = 3 * InputSize * InputSize;
@@ -148,6 +149,50 @@ public sealed class YoloDetector : IDisposable
         }
     }
 
+    /// <summary>
+    /// Letterbox resize — 保持宽高比缩放到 targetSize，多余部分用灰色(114)填充
+    /// </summary>
+    private static Image<Rgb24> LetterboxResize(Image<Rgb24> src, int targetSize)
+    {
+        float scale = Math.Min((float)targetSize / src.Width, (float)targetSize / src.Height);
+        int newW = (int)(src.Width * scale);
+        int newH = (int)(src.Height * scale);
+
+        using var resized = src.Clone(ctx => ctx.Resize(newW, newH, KnownResamplers.Bicubic));
+        var canvas = new Image<Rgb24>(targetSize, targetSize, new Rgb24(114, 114, 114));
+        int offsetX = (targetSize - newW) / 2;
+        int offsetY = (targetSize - newH) / 2;
+
+        canvas.Mutate(ctx => ctx.DrawImage(resized, new Point(offsetX, offsetY), 1f));
+        return canvas;
+    }
+
+
+    /// <summary>
+    /// 将 Image 类型图像归一化为模型输入的 Tensor 格式
+    /// </summary>
+    /// <param name="image">输入图像（已进行 Letterbox Resize）</param>
+    /// <param name="tensorData">预分配的浮点数数组，大小应为 3 × 640 × 640</param>
+    private static void NormalizeToTensor(Image<Rgb24> image, float[] tensorData)
+    {
+        int h = image.Height, w = image.Width;
+        image.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < h; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < w; x++)
+                {
+                    var p = row[x];
+                    int idx = y * w + x;
+                    tensorData[idx] = (p.R / 255f - Mean[0]) / Std[0];
+                    tensorData[h * w + idx] = (p.G / 255f - Mean[1]) / Std[1];
+                    tensorData[2 * h * w + idx] = (p.B / 255f - Mean[2]) / Std[2];
+                }
+            }
+        });
+    }
+
     private static List<(Rectangle Bbox, float Confidence)> Nms(List<(float X, float Y, float W, float H, float Score)> candidates)
     {
         var selected = new List<(Rectangle Bbox, float Confidence)>();
@@ -220,30 +265,5 @@ public sealed class YoloDetector : IDisposable
     public void Dispose()
     {
         _session?.Dispose();
-    }
-
-    /// <summary>
-    /// 将 Image 类型图像归一化为模型输入的 Tensor 格式
-    /// </summary>
-    /// <param name="image">输入图像（已进行 Letterbox Resize）</param>
-    /// <param name="tensorData">预分配的浮点数数组，大小应为 3 × 640 × 640</param>
-    private static void NormalizeToTensor(Image<Rgb24> image, float[] tensorData)
-    {
-        int h = image.Height, w = image.Width;
-        image.ProcessPixelRows(accessor =>
-        {
-            for (int y = 0; y < h; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < w; x++)
-                {
-                    var p = row[x];
-                    int idx = y * w + x;
-                    tensorData[idx] = (p.R / 255f - Mean[0]) / Std[0];
-                    tensorData[h * w + idx] = (p.G / 255f - Mean[1]) / Std[1];
-                    tensorData[2 * h * w + idx] = (p.B / 255f - Mean[2]) / Std[2];
-                }
-            }
-        });
     }
 }
