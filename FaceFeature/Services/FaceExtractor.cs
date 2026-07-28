@@ -49,15 +49,27 @@ public sealed class FaceExtractor : IDisposable
     /// <summary>
     /// 提取人脸特征向量
     /// </summary>
-    /// <param name="faceImage">裁剪后的人脸 RGB 图像</param>
+    /// <param name="sourceImage">原始 RGB 图像</param>
+    /// <param name="faceRect">人脸边界框（原图坐标）</param>
     /// <returns>L2 归一化的 512 维特征向量（原始字节）</returns>
-    public byte[] ExtractFeatures(Image<Rgb24> faceImage)
+    public byte[] ExtractFeatures(Image<Rgb24> sourceImage, Rectangle faceRect)
     {
         var sw = Stopwatch.StartNew();
 
-        // 1. Resize 到 112×112（ArcFace 期望输入尺寸）
-        using var resized = faceImage.Clone(ctx =>
-            ctx.Resize(InputSize, InputSize, KnownResamplers.Bicubic));
+        int x = Math.Clamp(faceRect.X, 0, sourceImage.Width - 1);
+        int y = Math.Clamp(faceRect.Y, 0, sourceImage.Height - 1);
+        int w = Math.Max(1, Math.Min(faceRect.Width, sourceImage.Width - x));
+        int h = Math.Max(1, Math.Min(faceRect.Height, sourceImage.Height - y));
+
+        // 1. 裁剪 + Resize 到 112×112 + 锐化增强小人脸细节
+        //    Lanczos3 比 Bicubic 在小图放大场景下能保留更多高频边缘
+        //    GaussianSharpen 补偿放大后的模糊
+        using var processed = sourceImage.Clone(ctx =>
+        {
+            ctx.Crop(new Rectangle(x, y, w, h));
+            ctx.Resize(InputSize, InputSize, KnownResamplers.Lanczos3);
+            // ctx.GaussianSharpen(0.5f);
+        });
 
         // 2. 构建 CHW 张量，InsightFace 归一化: (pixel - 127.5) / 128.0
         int planeSize = InputSize * InputSize;
@@ -65,7 +77,7 @@ public sealed class FaceExtractor : IDisposable
         float[] buffer = ArrayPool<float>.Shared.Rent(tensorSize);
         try
         {
-            resized.ProcessPixelRows(accessor =>
+            processed.ProcessPixelRows(accessor =>
             {
                 for (int y = 0; y < InputSize; y++)
                 {

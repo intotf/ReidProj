@@ -1,8 +1,6 @@
-using FaceFeature.Helpers;
 using FaceFeature.Payloads;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 
 namespace FaceFeature.Services;
 
@@ -93,18 +91,16 @@ public sealed class DetectService
         {
             var (box, conf) = detections[i];
 
-
-            int x = Math.Clamp(box.X, 0, image.Width - 1);
-            int y = Math.Clamp(box.Y, 0, image.Height - 1);
-            int w = Math.Max(1, Math.Min(box.Width, image.Width - x));
-            int h = Math.Max(1, Math.Min(box.Height, image.Height - y));
-
-            using var faceCrop = image.Clone(ctx => ctx.Crop(new Rectangle(x, y, w, h)));
+            var faceRect = new Rectangle(
+                Math.Clamp(box.X, 0, image.Width - 1),
+                Math.Clamp(box.Y, 0, image.Height - 1),
+                Math.Max(1, Math.Min(box.Width, image.Width - box.X)),
+                Math.Max(1, Math.Min(box.Height, image.Height - box.Y)));
 
             yield return new FaceDetection(
-                Bbox: new BoundingBox(x, y, w, h),
+                Bbox: new BoundingBox(faceRect.X, faceRect.Y, faceRect.Width, faceRect.Height),
                 Confidence: conf,
-                Features: _faceExtractor.ExtractFeatures(faceCrop));
+                Features: _faceExtractor.ExtractFeatures(image, faceRect));
         }
     }
 
