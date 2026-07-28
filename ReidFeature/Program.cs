@@ -35,6 +35,7 @@ namespace ReidFeature
             builder.Services.AddSingleton<YoloDetector>();
             builder.Services.AddSingleton<ReIdExtractor>();
             builder.Services.AddSingleton<FaceDetector>();
+            builder.Services.AddSingleton<FaceExtractor>();
             builder.Services.AddSingleton<DetectService>();
             builder.Services.AddSingleton<IPersonGroupProvider, MockPersonGroupProvider>();
 

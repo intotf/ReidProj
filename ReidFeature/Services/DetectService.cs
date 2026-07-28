@@ -7,13 +7,14 @@ using SixLabors.ImageSharp.Processing;
 namespace ReidFeature.Services;
 
 /// <summary>
-/// 检测编排服务：YOLO 人物检测 → ReID 特征提取 → 人脸检测（可选）
+/// 检测编排服务：YOLO 人物检测 → ReID 特征提取 → 人脸检测（可选）→ 人脸特征提取（可选）
 /// </summary>
 public sealed class DetectService
 {
     private readonly YoloDetector _yolo;
     private readonly ReIdExtractor _reid;
     private readonly FaceDetector _faceDetector;
+    private readonly FaceExtractor _faceExtractor;
     private readonly ILogger<DetectService> _logger;
 
     /// <summary>
@@ -22,12 +23,14 @@ public sealed class DetectService
     /// <param name="yolo"></param>
     /// <param name="reid"></param>
     /// <param name="faceDetector"></param>
+    /// <param name="faceExtractor"></param>
     /// <param name="logger"></param>
-    public DetectService(YoloDetector yolo, ReIdExtractor reid, FaceDetector faceDetector, ILogger<DetectService> logger)
+    public DetectService(YoloDetector yolo, ReIdExtractor reid, FaceDetector faceDetector, FaceExtractor faceExtractor, ILogger<DetectService> logger)
     {
         _yolo = yolo;
         _reid = reid;
         _faceDetector = faceDetector;
+        _faceExtractor = faceExtractor;
         _logger = logger;
     }
 
@@ -117,6 +120,18 @@ public sealed class DetectService
             if (!flags.HasFlag(DetectionFlags.SkipFaceDetection))
             {
                 face = _faceDetector.DetectBestFace(cropped, box.X, box.Y);
+                if (face is { } fd)
+                {
+                    // 从原图中裁剪人脸区域提取特征
+                    int fx = Math.Clamp(fd.Bbox.X, 0, image.Width - 1);
+                    int fy = Math.Clamp(fd.Bbox.Y, 0, image.Height - 1);
+                    int fw = Math.Max(1, Math.Min(fd.Bbox.Width, image.Width - fx));
+                    int fh = Math.Max(1, Math.Min(fd.Bbox.Height, image.Height - fy));
+
+                    using var faceCrop = image.Clone(ctx => ctx.Crop(new Rectangle(fx, fy, fw, fh)));
+                    var features = _faceExtractor.ExtractFeatures(faceCrop);
+                    face = fd with { Features = features };
+                }
             }
 
             yield return new PersonDetection(

@@ -1,7 +1,7 @@
 namespace ReidFeature;
 
 /// <summary>
-/// ONNX Runtime SessionOptions 配置模型，支持三个模型各自的独立配置，可从 appsettings.json 绑定
+/// ONNX Runtime SessionOptions 配置模型，支持四个模型各自的独立配置，可从 appsettings.json 绑定
 /// </summary>
 public sealed class OnnxSessionOptions
 {
@@ -13,6 +13,9 @@ public sealed class OnnxSessionOptions
 
     /// <summary>人脸检测配置</summary>
     public Microsoft.ML.OnnxRuntime.SessionOptions Face { get; set; } = Default();
+
+    /// <summary>人脸特征提取配置</summary>
+    public Microsoft.ML.OnnxRuntime.SessionOptions FaceRec { get; set; } = Default();
 
     private static Microsoft.ML.OnnxRuntime.SessionOptions Default() => new()
     {
