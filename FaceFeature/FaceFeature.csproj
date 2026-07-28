@@ -6,7 +6,7 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<InvariantGlobalization>true</InvariantGlobalization>
 		<PublishAot>true</PublishAot>
-		<RootNamespace>ReidFeature</RootNamespace>
+		<RootNamespace>FaceFeature</RootNamespace>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<AllowUnsafeBlocks>false</AllowUnsafeBlocks>
 		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
