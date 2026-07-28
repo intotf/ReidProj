@@ -27,6 +27,9 @@ public class ReidFaceDetection
 
     [JsonPropertyName("confidence")]
     public float Confidence { get; set; }
+
+    [JsonPropertyName("features")]
+    public byte[] Features { get; set; } = [];
 }
 
 public class ReidBoundingBox

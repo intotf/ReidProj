@@ -37,4 +37,7 @@ static partial class Log
 
     [LoggerMessage(Level = LogLevel.Error, Message = "检测管线异常")]
     public static partial void DetectPipelineFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "人脸特征: dim={Dim}, 耗时 {Elapsed:F1}ms")]
+    public static partial void FaceFeatureExtracted(ILogger logger, long dim, double elapsed);
 }

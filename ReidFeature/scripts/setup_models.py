@@ -9,6 +9,7 @@ setup_models.py — 完全自包含的模型下载和 ONNX 导出脚本
     models/yolo11n.onnx        — YOLOv11n 人物检测模型
     models/reid_model.onnx      — FastReID ResNet50-IBN-a 特征提取模型
     models/scrfd_10g.onnx       — SCRFD-10g 人脸检测模型
+    models/w600k_r50.onnx       — ArcFace 人脸特征提取模型
 """
 import os
 import sys
@@ -78,12 +79,13 @@ def export_yolo():
 # ═══════════════════════════════════════════════════════════════════
 def export_scrfd_face():
     face_onnx = MODELS_DIR / "scrfd_10g.onnx"
-    if face_onnx.exists():
-        log(f"✅ SCRFD ONNX 已存在，跳过: {face_onnx}")
+    face_rec_onnx = MODELS_DIR / "w600k_r50.onnx"
+    if face_onnx.exists() and face_rec_onnx.exists():
+        log(f"✅ 人脸模型已存在，跳过")
         return
 
     log("=" * 50)
-    log("Step 3/3: 从 InsightFace buffalo_l 提取 SCRFD-10g ONNX")
+    log("Step: 从 InsightFace buffalo_l 提取 SCRFD-10g + ArcFace ONNX")
     log("=" * 50)
 
     import urllib.request
@@ -93,12 +95,15 @@ def export_scrfd_face():
     resp = urllib.request.urlopen(url)
     data = resp.read()
     log(f"  下载完成 ({len(data) / 1024 / 1024:.1f} MB)")
-    log("从 zip 中提取 det_10g.onnx ...")
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        log("从 zip 中提取 det_10g.onnx ...")
         zf.extract("det_10g.onnx", MODELS_DIR)
+        log("从 zip 中提取 w600k_r50.onnx ...")
+        zf.extract("w600k_r50.onnx", MODELS_DIR)
     (MODELS_DIR / "det_10g.onnx").rename(face_onnx)
-    size_mb = round(face_onnx.stat().st_size / 1024 / 1024, 1)
-    log(f"✅ SCRFD-10g ONNX 已就绪: {face_onnx} ({size_mb} MB)")
+    log(f"✅ SCRFD-10g ONNX 已就绪: {face_onnx} ({round(face_onnx.stat().st_size / 1024 / 1024, 1)} MB)")
+    rec_size_mb = round(face_rec_onnx.stat().st_size / 1024 / 1024, 1)
+    log(f"✅ ArcFace ONNX 已就绪:       {face_rec_onnx} ({rec_size_mb} MB)")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -304,6 +309,7 @@ def main():
     log(f"   - {MODELS_DIR / 'yolo11n.onnx'}")
     log(f"   - {MODELS_DIR / 'reid_model.onnx'}")
     log(f"   - {MODELS_DIR / 'scrfd_10g.onnx'}")
+    log(f"   - {MODELS_DIR / 'w600k_r50.onnx'}")
     log("=" * 50)
 
 

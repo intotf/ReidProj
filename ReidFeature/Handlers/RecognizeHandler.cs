@@ -150,17 +150,24 @@ namespace ReidFeature.Handlers
             await foreach (var detection in detections.WithCancellation(cancellationToken))
             {
                 var bestMatch = persons
-                    .Select(p => { var (sim, src) = p.ReidSimilarity(detection.Features); return new { Person = p, Similarity = sim, SourceFile = src }; })
-                    .MaxBy(p => p.Similarity);
+                    .Select(p => new
+                    {
+                        Person = p,
+                        FaceSimilarity = p.FaceSimilarity(detection.Face?.Features),
+                        ReidSimilarity = p.ReidSimilarity(detection.Features)
+                    })
+                    .OrderByDescending(i => i.FaceSimilarity)
+                    .ThenByDescending(i => i.ReidSimilarity)
+                    .FirstOrDefault();
 
-                if (bestMatch != null && bestMatch.Similarity >= similarityThreshold)
+                if (bestMatch != null && bestMatch.ReidSimilarity >= similarityThreshold)
                 {
                     yield return new PersonRecognition(
                         bestMatch.Person.Id,
                         bestMatch.Person.GroupId,
                         bestMatch.Person.Name,
-                        bestMatch.Similarity,
-                        bestMatch.SourceFile);
+                        bestMatch.FaceSimilarity,
+                        bestMatch.ReidSimilarity);
                 }
             }
         }
