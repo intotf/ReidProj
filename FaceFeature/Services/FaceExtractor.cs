@@ -56,19 +56,19 @@ public sealed class FaceExtractor : IDisposable
     {
         var sw = Stopwatch.StartNew();
 
-        int x = Math.Clamp(faceRect.X, 0, sourceImage.Width - 1);
-        int y = Math.Clamp(faceRect.Y, 0, sourceImage.Height - 1);
-        int w = Math.Max(1, Math.Min(faceRect.Width, sourceImage.Width - x));
-        int h = Math.Max(1, Math.Min(faceRect.Height, sourceImage.Height - y));
+        // 0. 扩展人脸框 20% 以获得更多头部轮廓上下文，再 clamp 到图像边界
+        var expanded = ExpandRect(faceRect, 0.2f, sourceImage.Width, sourceImage.Height);
 
-        // 1. 裁剪 + Resize 到 112×112 + 锐化增强小人脸细节
-        //    Lanczos3 比 Bicubic 在小图放大场景下能保留更多高频边缘
-        //    GaussianSharpen 补偿放大后的模糊
+        // 1. 裁剪 → 保持宽高比缩放（长边=112）→ 居中 pad 到 112×112
+        //    避免直接拉伸破坏人脸比例，黑色填充不影响归一化后的特征主体
         using var processed = sourceImage.Clone(ctx =>
         {
-            ctx.Crop(new Rectangle(x, y, w, h));
-            ctx.Resize(InputSize, InputSize, KnownResamplers.Lanczos3);
-            // ctx.GaussianSharpen(0.5f);
+            ctx.Crop(expanded);
+            float scale = (float)InputSize / Math.Max(expanded.Width, expanded.Height);
+            int newW = (int)(expanded.Width * scale);
+            int newH = (int)(expanded.Height * scale);
+            ctx.Resize(newW, newH, KnownResamplers.Lanczos3);
+            ctx.Pad(InputSize, InputSize, Color.Black);
         });
 
         // 2. 构建 CHW 张量，InsightFace 归一化: (pixel - 127.5) / 128.0
@@ -111,6 +111,20 @@ public sealed class FaceExtractor : IDisposable
         {
             ArrayPool<float>.Shared.Return(buffer);
         }
+    }
+
+    /// <summary>
+    /// 沿中心扩展人脸边界框，增加上下文信息，再 clamp 到图像边界
+    /// </summary>
+    private static Rectangle ExpandRect(Rectangle rect, float margin, int maxW, int maxH)
+    {
+        int expandW = (int)(rect.Width * margin);
+        int expandH = (int)(rect.Height * margin);
+        int x = Math.Clamp(rect.X - expandW / 2, 0, maxW - 1);
+        int y = Math.Clamp(rect.Y - expandH / 2, 0, maxH - 1);
+        int w = Math.Clamp(rect.Width + expandW, 1, maxW - x);
+        int h = Math.Clamp(rect.Height + expandH, 1, maxH - y);
+        return new Rectangle(x, y, w, h);
     }
 
     /// <summary>
