@@ -29,6 +29,7 @@ if (args.Length < 1)
     Console.WriteLine("  --threshold <float>      相似度阈值 (默认: {0})", config.Threshold);
     Console.WriteLine("  --flags <int>            检测标志位: 0=All, 1=SkipFaceDetection, 2=StopOnFirstFrameHit (默认: {0})", config.Flags);
     Console.WriteLine("  --ffmpeg-path <path>     ffmpeg 可执行文件路径 (默认: {0} 或 PATH)", string.IsNullOrEmpty(config.FfmpegPath) ? "自动查找" : config.FfmpegPath);
+    Console.WriteLine("  --save-matched           匹配时保存抽帧图片到 {mp4文件名}_temp 目录");
     Console.WriteLine();
     Console.WriteLine("示例:");
     Console.WriteLine("  ReIdMp4Cli \"D:\\Videos\\test.mp4\"");
@@ -46,6 +47,7 @@ var threshold = config.Threshold;
 var flags = config.Flags;
 var ffmpegPath = !string.IsNullOrEmpty(config.FfmpegPath) ? config.FfmpegPath : FindFfmpeg();
 var ffmpegArgsTemplate = config.FfmpegArgs;
+var saveMatched = false;
 
 for (int i = namedStartIndex; i < args.Length; i++)
 {
@@ -57,6 +59,8 @@ for (int i = namedStartIndex; i < args.Length; i++)
         flags = int.TryParse(args[++i], out var f) ? f : flags;
     else if (args[i] == "--ffmpeg-path" && i + 1 < args.Length)
         ffmpegPath = args[++i];
+    else if (args[i] == "--save-matched")
+        saveMatched = true;
 }
 
 // ── 校验参数 ──────────────────────────────────────
@@ -113,6 +117,16 @@ try
     int matchCount = 0;
     var allMatches = new List<(string FrameName, PersonRecognition Rec)>();
 
+    // 匹配帧保存目录
+    string? matchedDir = null;
+    if (saveMatched)
+    {
+        var mp4Name = Path.GetFileNameWithoutExtension(mp4Path);
+        matchedDir = Path.Combine(Path.GetDirectoryName(mp4Path) ?? ".", $"{mp4Name}_temp");
+        Directory.CreateDirectory(matchedDir);
+        Console.WriteLine($"  匹配帧保存: {matchedDir}");
+    }
+
     foreach (var framePath in frameFiles)
     {
         var frameName = Path.GetFileName(framePath);
@@ -127,6 +141,14 @@ try
             {
                 matchCount++;
                 Console.WriteLine($" ✓ 匹配到 {recognitions.Count} 个!");
+
+                // 保存匹配帧到 {mp4文件名}_temp 目录
+                if (matchedDir != null)
+                {
+                    var savePath = Path.Combine(matchedDir, frameName);
+                    File.Copy(framePath, savePath, overwrite: true);
+                }
+
                 foreach (var rec in recognitions)
                 {
                     allMatches.Add((frameName, rec));
@@ -164,6 +186,9 @@ try
         Console.WriteLine($"     相似度:  {best.Rec.ReidSimilarity:F4}");
         Console.WriteLine($"     目标图片: {best.Rec.SourceFile ?? "未知"}");
     }
+
+    if (matchedDir != null)
+        Console.WriteLine($"匹配帧保存:   {matchedDir}");
 
     Console.WriteLine(new string('─', 60));
 

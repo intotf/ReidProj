@@ -370,3 +370,5 @@ FodyWeavers.xsd
 /ReidFeature/tools/ffmpeg
 /ReidFeature/tools/ffmpeg.exe
 /ReidFeature/scripts/.venv_scrfd
+/ReidFeature/datas/persongroups/group2
+/MediaDownloader/appsettings.Development.json

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "MediaDownloader": {
+      "commandName": "Project",
+      "commandLineArgs": "--device-id 6a4b644e725215f520ac06d2 --output-dir \"D:\\ReIdTest\\medias\""
+    }
+  }
+}
