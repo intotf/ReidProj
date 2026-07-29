@@ -11,99 +11,54 @@ namespace FaceFeature.Services;
 public sealed class DetectService
 {
     private readonly FaceDetector _faceDetector;
-    private readonly FaceExtractor _faceExtractor;
-    private readonly ILogger<DetectService> _logger;
-
-    /// <summary>人脸在原图中的最小尺寸（像素），低于此值的人脸特征不可靠，将被忽略</summary>
-    private const int MinFaceSize = 50;
+    private readonly FaceExtractor _faceExtractor; 
 
     /// <summary>
     /// 人脸检测编排服务
     /// </summary>
     /// <param name="faceDetector"></param>
-    /// <param name="faceExtractor"></param>
-    /// <param name="logger"></param>
-    public DetectService(FaceDetector faceDetector, FaceExtractor faceExtractor, ILogger<DetectService> logger)
+    /// <param name="faceExtractor"></param> 
+    public DetectService(FaceDetector faceDetector, FaceExtractor faceExtractor )
     {
         _faceDetector = faceDetector;
-        _faceExtractor = faceExtractor;
-        _logger = logger;
+        _faceExtractor = faceExtractor; 
     }
 
     /// <summary>
-    /// 对输入图像执行完整人脸检测管线
+    /// 对输入图像检测面积最大的最佳人脸（性能优先——避免全量特征提取）
     /// </summary>
-    /// <param name="image">输入 RGB 图像</param>
-    /// <param name="flags">检测功能标志位</param>
-    /// <param name="frameIndex">帧索引（视频场景下传入当前帧序号；非视频场景默认为 0）</param>
-    /// <returns>检测到的人脸列表（可能为空）</returns>
-    public IEnumerable<FaceDetection> DetectFaces(Image<Rgb24> image, DetectionFlags flags, int frameIndex = 0)
+    /// <param name="image">输入 RGB 图像</param> 
+    /// <returns>最佳人脸检测结果，无人脸时返回 null</returns>
+    public FaceDetection? DetectBestFace(Image<Rgb24> image)
     {
-#if DEBUG
-        var results = new List<FaceDetection>();
-#endif
+        var best = _faceDetector.DetectBest(image);
+        if (best is null)
+            return null;
 
-        using var enumerator = RunPipeline(image, flags, frameIndex).GetEnumerator();
-        while (true)
-        {
-            var item = default(FaceDetection);
-            try
-            {
-                if (!enumerator.MoveNext())
-                    break;
-                item = enumerator.Current;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "检测管线异常");
-                break;
-            }
+        var (box, conf) = best.Value;
+        var faceRect = new Rectangle(
+            Math.Clamp(box.X, 0, image.Width - 1),
+            Math.Clamp(box.Y, 0, image.Height - 1),
+            Math.Max(1, Math.Min(box.Width, image.Width - box.X)),
+            Math.Max(1, Math.Min(box.Height, image.Height - box.Y)));
 
-            if (item is not null)
-            {
-#if DEBUG
-                results.Add(item);
-#endif
-                yield return item;
-            }
-        }
+        var result = new FaceDetection(
+            Bbox: new BoundingBox(faceRect.X, faceRect.Y, faceRect.Width, faceRect.Height),
+            Confidence: conf,
+            Features: _faceExtractor.ExtractFeatures(image, faceRect));
 
 #if DEBUG
-        if (results.Count > 0)
-        {
-            using var annotated = image.Clone();
-            DrawDetectionBoxes(annotated, results);
-            var outDir = Path.Combine(AppContext.BaseDirectory, "out");
-            Directory.CreateDirectory(outDir);
-            var path = Path.Combine(outDir, $"{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
-            annotated.SaveAsPng(path);
-        }
+        using var annotated = image.Clone();
+        DrawDetectionBoxes(annotated, [result]);
+        var outDir = Path.Combine(AppContext.BaseDirectory, "out");
+        Directory.CreateDirectory(outDir);
+        var path = Path.Combine(outDir, $"{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
+        annotated.SaveAsPng(path);
 #endif
+
+        return result;
     }
-
-    private IEnumerable<FaceDetection> RunPipeline(Image<Rgb24> image, DetectionFlags flags, int frameIndex)
-    {
-        var detections = _faceDetector.Detect(image);
-        if (detections.Count == 0)
-            yield break;
-
-        for (int i = 0; i < detections.Count; i++)
-        {
-            var (box, conf) = detections[i];
-
-            var faceRect = new Rectangle(
-                Math.Clamp(box.X, 0, image.Width - 1),
-                Math.Clamp(box.Y, 0, image.Height - 1),
-                Math.Max(1, Math.Min(box.Width, image.Width - box.X)),
-                Math.Max(1, Math.Min(box.Height, image.Height - box.Y)));
-
-            yield return new FaceDetection(
-                Bbox: new BoundingBox(faceRect.X, faceRect.Y, faceRect.Width, faceRect.Height),
-                Confidence: conf,
-                Features: _faceExtractor.ExtractFeatures(image, faceRect));
-        }
-    }
-
+     
     /// <summary>
     /// 在图像上绘制人脸边界框（红色）
     /// </summary>

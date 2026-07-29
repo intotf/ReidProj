@@ -32,11 +32,11 @@ namespace FaceFeature.Services
                         using var image = Image.Load<Rgb24>(imageFile);
                         var personId = Path.GetFileName(imageFile);
 
-                        foreach (var face in detectService.DetectFaces(image, DetectionFlags.All))
+                        var face = detectService.DetectBestFace(image);
+                        if (face is not null)
                         {
                             var person = new FacePerson(personId, groupId, personName, face.Features);
                             personList.Add(person);
-                            break;
                         }
                     }
                 }

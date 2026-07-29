@@ -91,7 +91,7 @@ public sealed class FaceDetector : IDisposable
     /// </summary>
     /// <param name="image">输入 RGB 图像</param>
     /// <returns>人脸边界框列表（坐标相对于原图），无人脸时返回空列表</returns>
-    public List<(Rectangle Bbox, float Confidence)> Detect(Image<Rgb24> image)
+    private List<(Rectangle Bbox, float Confidence)> DetectAll(Image<Rgb24> image)
     {
         var sw = Stopwatch.StartNew();
 
@@ -144,6 +144,33 @@ public sealed class FaceDetector : IDisposable
         {
             ArrayPool<float>.Shared.Return(buffer);
         }
+    }
+
+    /// <summary>
+    /// 检测图像中面积最大且置信度超过阈值的最佳人脸（性能优先——避免全量特征提取）
+    /// </summary>
+    /// <param name="image">输入 RGB 图像</param>
+    /// <returns>面积最大的单人脸，无人脸时返回 null</returns>
+    public (Rectangle Bbox, float Confidence)? DetectBest(Image<Rgb24> image)
+    {
+        var detections = DetectAll(image);
+        if (detections.Count == 0)
+            return null;
+
+        // 选取面积最大的人脸（置信度已由 Detect 内部过滤）
+        (Rectangle Bbox, float Confidence) best = default;
+        int bestArea = -1;
+        foreach (var d in detections)
+        {
+            int area = d.Bbox.Width * d.Bbox.Height;
+            if (area > bestArea)
+            {
+                bestArea = area;
+                best = d;
+            }
+        }
+
+        return best;
     }
 
     /// <summary>

@@ -13,22 +13,22 @@ namespace FaceFeature.Handlers;
 public static class DetectHandler
 {
     /// <summary>
-    /// 处理检测请求：通过原始二进制上传图片
+    /// 处理检测请求：通过原始二进制上传图片，检测面积最大的最佳人脸
     /// </summary>
     /// <param name="request">HTTP 请求体，包含原始图片二进制数据</param>
     /// <param name="detectService">检测编排服务</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="cancellationToken">取消令牌</param>
-    public static async IAsyncEnumerable<FaceDetection> HandleImageAsync(
+    public static async Task<FaceDetection?> HandleImageAsync(
         HttpRequest request,
         DetectService detectService,
         ILogger<Program> logger,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         if (request.ContentLength == null || request.ContentLength == 0)
         {
             Log.RequestBodyEmpty(logger);
-            yield break;
+            return null;
         }
 
         Image<Rgb24> image;
@@ -40,37 +40,33 @@ public static class DetectHandler
         {
             cancellationToken.ThrowIfCancellationRequested();
             Log.ImageDecodeFailed(logger, ex);
-            yield break;
+            return null;
         }
 
         using (image)
         {
-            foreach (var item in detectService.DetectFaces(image, DetectionFlags.All))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                yield return item;
-            }
+            return detectService.DetectBestFace(image);
         }
     }
 
     /// <summary>
-    /// 处理检测请求：通过图片 URL 下载后检测
+    /// 处理检测请求：通过图片 URL 下载后检测，检测面积最大的最佳人脸
     /// </summary>
     /// <param name="request">URL 检测请求，包含 ImageUrl 属性</param>
     /// <param name="detectService">检测编排服务</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="httpClient">用于下载图片的 HTTP 客户端</param>
     /// <param name="cancellationToken">取消令牌</param>
-    public static async IAsyncEnumerable<FaceDetection> HandleImageUrlAsync(
+    public static async Task<FaceDetection?> HandleImageUrlAsync(
         UrlDetectRequest request,
         DetectService detectService,
         ILogger<Program> logger,
         HttpClient httpClient,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.ImageUrl))
         {
-            yield break;
+            return null;
         }
 
         Image<Rgb24> image;
@@ -84,16 +80,12 @@ public static class DetectHandler
         {
             cancellationToken.ThrowIfCancellationRequested();
             Log.ImageDecodeFailed(logger, ex);
-            yield break;
+            return null;
         }
 
         using (image)
         {
-            foreach (var item in detectService.DetectFaces(image, DetectionFlags.All))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                yield return item;
-            }
+            return detectService.DetectBestFace(image);
         }
     }
 
@@ -155,42 +147,21 @@ public static class DetectHandler
             yield break;
         }
 
-        var frameIdx = 0;
-        var enumerable = VideoDecoder.DecodeFramesAsync(request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
-        await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
-
-        var hasHit = false;
-        while (true)
+        await foreach (var image in VideoDecoder.DecodeFramesAsync(request.Body, codec, logger, frameIntervalSeconds, cancellationToken))
         {
-            Image<Rgb24> image;
-            try
-            {
-                if (!await enumerator.MoveNextAsync())
-                    break;
-                image = enumerator.Current;
-            }
-            catch (Exception ex)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                Log.VideoDecodeFailed(logger, ex);
-                yield break;
-            }
-
             using (image)
             {
-                foreach (var item in detectService.DetectFaces(image, flags, frameIdx))
+                var item = detectService.DetectBestFace(image);
+                if (item is not null)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    hasHit = true;
                     yield return item;
+
+                    if (flags.HasFlag(DetectionFlags.StopOnFirstFrameHit))
+                    {
+                        yield break;
+                    }
                 }
             }
-
-            // StopOnFirstFrameHit：一帧检测到目标就提前结束视频解码
-            if (hasHit && flags.HasFlag(DetectionFlags.StopOnFirstFrameHit))
-                yield break;
-
-            frameIdx++;
         }
     }
 }
