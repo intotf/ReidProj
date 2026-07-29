@@ -156,11 +156,12 @@ namespace ReidFeature.Handlers
                         FaceSimilarity = p.FaceSimilarity(detection.Face?.Features),
                         ReidSimilarity = p.ReidSimilarity(detection.Features)
                     })
+                    .Where(i => i.FaceSimilarity > similarityThreshold || i.ReidSimilarity > similarityThreshold)
                     .OrderByDescending(i => i.FaceSimilarity)
                     .ThenByDescending(i => i.ReidSimilarity)
                     .FirstOrDefault();
 
-                if (bestMatch != null && bestMatch.ReidSimilarity >= similarityThreshold)
+                if (bestMatch != null)
                 {
                     yield return new PersonRecognition(
                         bestMatch.Person.Id,

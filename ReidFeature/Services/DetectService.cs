@@ -17,6 +17,9 @@ public sealed class DetectService
     private readonly FaceExtractor _faceExtractor;
     private readonly ILogger<DetectService> _logger;
 
+    /// <summary>人脸在原图中的最小尺寸（像素），低于此值的人脸特征不可靠，将被忽略</summary>
+    private const int MinFaceSize = 50;
+
     /// <summary>
     /// 检测编排服务
     /// </summary>
@@ -122,15 +125,23 @@ public sealed class DetectService
                 face = _faceDetector.DetectBestFace(cropped, box.X, box.Y);
                 if (face is { } fd)
                 {
-                    // 从原图中裁剪人脸区域提取特征
-                    int fx = Math.Clamp(fd.Bbox.X, 0, image.Width - 1);
-                    int fy = Math.Clamp(fd.Bbox.Y, 0, image.Height - 1);
-                    int fw = Math.Max(1, Math.Min(fd.Bbox.Width, image.Width - fx));
-                    int fh = Math.Max(1, Math.Min(fd.Bbox.Height, image.Height - fy));
+                    // 门铃广角场景小人脸特征不可靠，低于阈值则放弃人脸，仅依赖 ReID
+                    if (fd.Bbox.Width < MinFaceSize || fd.Bbox.Height < MinFaceSize)
+                    {
+                        face = null;
+                    }
+                    else
+                    {
+                        // 从原图中裁剪人脸区域提取特征
+                        int fx = Math.Clamp(fd.Bbox.X, 0, image.Width - 1);
+                        int fy = Math.Clamp(fd.Bbox.Y, 0, image.Height - 1);
+                        int fw = Math.Max(1, Math.Min(fd.Bbox.Width, image.Width - fx));
+                        int fh = Math.Max(1, Math.Min(fd.Bbox.Height, image.Height - fy));
 
-                    using var faceCrop = image.Clone(ctx => ctx.Crop(new Rectangle(fx, fy, fw, fh)));
-                    var features = _faceExtractor.ExtractFeatures(faceCrop);
-                    face = fd with { Features = features };
+                        using var faceCrop = image.Clone(ctx => ctx.Crop(new Rectangle(fx, fy, fw, fh)));
+                        var features = _faceExtractor.ExtractFeatures(faceCrop);
+                        face = fd with { Features = features };
+                    }
                 }
             }
 
