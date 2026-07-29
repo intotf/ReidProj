@@ -96,17 +96,15 @@ public static class DetectHandler
     /// <param name="detectService">检测编排服务</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）；≤0 时解码输入流的所有帧</param>
-    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 2=StopOnFirstFrameHit(首帧命中即停)</param>
     /// <param name="cancellationToken">取消令牌</param>
     public static IAsyncEnumerable<FaceDetection> HandleH264StreamAsync(
         HttpContext context,
         DetectService detectService,
         ILogger<Program> logger,
         int frameIntervalSeconds = 5,
-        DetectionFlags flags = DetectionFlags.All,
         CancellationToken cancellationToken = default)
     {
-        return HandleVideoAsync(context.Request, detectService, flags, VideoCodec.H264, frameIntervalSeconds, logger, cancellationToken);
+        return HandleVideoAsync(context.Request, detectService, VideoCodec.H264, frameIntervalSeconds, logger, cancellationToken);
     }
 
     /// <summary>
@@ -116,17 +114,15 @@ public static class DetectHandler
     /// <param name="detectService">检测编排服务</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）；≤0 时解码输入流的所有帧</param>
-    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 2=StopOnFirstFrameHit(首帧命中即停)</param>
     /// <param name="cancellationToken">取消令牌</param>
     public static IAsyncEnumerable<FaceDetection> HandleH265StreamAsync(
         HttpContext context,
         DetectService detectService,
         ILogger<Program> logger,
         int frameIntervalSeconds = 5,
-        DetectionFlags flags = DetectionFlags.All,
         CancellationToken cancellationToken = default)
     {
-        return HandleVideoAsync(context.Request, detectService, flags, VideoCodec.H265, frameIntervalSeconds, logger, cancellationToken);
+        return HandleVideoAsync(context.Request, detectService, VideoCodec.H265, frameIntervalSeconds, logger, cancellationToken);
     }
 
     /// <summary>
@@ -135,7 +131,6 @@ public static class DetectHandler
     private static async IAsyncEnumerable<FaceDetection> HandleVideoAsync(
         HttpRequest request,
         DetectService detectService,
-        DetectionFlags flags,
         VideoCodec codec,
         int frameIntervalSeconds,
         ILogger logger,
@@ -155,11 +150,6 @@ public static class DetectHandler
                 if (item is not null)
                 {
                     yield return item;
-
-                    if (flags.HasFlag(DetectionFlags.StopOnFirstFrameHit))
-                    {
-                        yield break;
-                    }
                 }
             }
         }
