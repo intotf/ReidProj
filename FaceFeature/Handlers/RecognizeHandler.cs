@@ -65,12 +65,11 @@ namespace FaceFeature.Handlers
             ILogger<Program> logger,
             string groupId,
             int frameIntervalSeconds = 5,
-            DetectionFlags flags = DetectionFlags.All,
             float similarityThreshold = SimilarityThreshold,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             var persons = await faceGroupProvider.GetPersonsAsync(groupId, cancellationToken);
-            var detections = DetectHandler.HandleH264StreamAsync(context, detectService, logger, frameIntervalSeconds, flags, cancellationToken);
+            var detections = DetectHandler.HandleH264StreamAsync(context, detectService, logger, frameIntervalSeconds, cancellationToken);
 
             await foreach (var recognition in RecognizeAsync(persons, detections, similarityThreshold, cancellationToken))
             {
@@ -88,12 +87,11 @@ namespace FaceFeature.Handlers
             ILogger<Program> logger,
             string groupId,
             int frameIntervalSeconds = 5,
-            DetectionFlags flags = DetectionFlags.All,
             float similarityThreshold = SimilarityThreshold,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             var persons = await faceGroupProvider.GetPersonsAsync(groupId, cancellationToken);
-            var detections = DetectHandler.HandleH265StreamAsync(context, detectService, logger, frameIntervalSeconds, flags, cancellationToken);
+            var detections = DetectHandler.HandleH265StreamAsync(context, detectService, logger, frameIntervalSeconds, cancellationToken);
 
             await foreach (var recognition in RecognizeAsync(persons, detections, similarityThreshold, cancellationToken))
             {
