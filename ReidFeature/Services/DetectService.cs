@@ -117,11 +117,11 @@ public sealed class DetectService
             int w = Math.Max(1, Math.Min(box.Width, image.Width - x));
             int h = Math.Max(1, Math.Min(box.Height, image.Height - y));
 
-            using var cropped = image.Clone(ctx => ctx.Crop(new Rectangle(x, y, w, h)));
-
             FaceDetection? face = null;
             if (!flags.HasFlag(DetectionFlags.SkipFaceDetection))
             {
+                using var cropped = image.Clone(ctx => ctx.Crop(new Rectangle(x, y, w, h)));
+
                 face = _faceDetector.DetectBestFace(cropped, box.X, box.Y);
                 if (face is { } fd)
                 {
@@ -149,7 +149,7 @@ public sealed class DetectService
                 FrameIndex: frameIndex,
                 Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),
                 Confidence: conf,
-                Features: _reid.ExtractFeatures(cropped),
+                Features: _reid.ExtractFeatures(image, new BoundingBox(x, y, w, h)),
                 Face: face);
         }
     }

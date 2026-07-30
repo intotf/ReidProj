@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using ReidFeature.Helpers;
+using ReidFeature.Payloads;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
@@ -12,7 +13,7 @@ using System.Runtime.InteropServices;
 namespace ReidFeature.Services;
 
 /// <summary>
-/// FastReID ONNX 特征提取器 — 接收 RGB 裁剪图，输出归一化特征向量
+/// FastReID ONNX 特征提取器 — 接收原图+人物框，输出归一化特征向量
 /// </summary>
 public sealed class ReIdExtractor : IDisposable
 {
@@ -48,43 +49,58 @@ public sealed class ReIdExtractor : IDisposable
     /// <summary>
     /// 提取人物特征向量
     /// </summary>
-    /// <param name="personImage">裁剪后的人物 RGB 图像</param>
+    /// <param name="sourceImage">原始 RGB 图像</param>
+    /// <param name="personRect">人物边界框（原图坐标）</param>
     /// <returns>L2 归一化的特征向量</returns>
-    public byte[] ExtractFeatures(Image<Rgb24> personImage)
+    public byte[] ExtractFeatures(Image<Rgb24> sourceImage, BoundingBox personRect)
     {
         var sw = Stopwatch.StartNew();
 
-        // 1. Resize 到 256×128（ReID 期望输入尺寸）
-        using var resized = personImage.Clone(ctx =>
-            ctx.Resize(InputWidth, InputHeight, KnownResamplers.Bicubic));
+        // 1. Clamp 边界框到图像范围内
+        int x = Math.Clamp(personRect.X, 0, sourceImage.Width - 1);
+        int y = Math.Clamp(personRect.Y, 0, sourceImage.Height - 1);
+        int w = Math.Max(1, Math.Min(personRect.Width, sourceImage.Width - x));
+        int h = Math.Max(1, Math.Min(personRect.Height, sourceImage.Height - y));
+        var rect = new Rectangle(x, y, w, h);
 
-        // 2. 构建 CHW tensor（原始像素值 [0,1]，mean/std 由 ONNX 图内嵌处理）
-        int h = resized.Height, w = resized.Width;
-        int bufferSize = 3 * h * w;
+        // 2. 裁剪 → 保持宽高比缩放（长边适配目标尺寸）→ 居中黑色填充至 128×256
+        //    避免直接拉伸破坏人物比例，黑色填充不影响后续归一化
+        using var processed = sourceImage.Clone(ctx =>
+        {
+            ctx.Crop(rect);
+            float scale = Math.Min((float)InputWidth / w, (float)InputHeight / h);
+            int newW = Math.Max(1, (int)(w * scale));
+            int newH = Math.Max(1, (int)(h * scale));
+            ctx.Resize(newW, newH, KnownResamplers.Lanczos3);
+            ctx.Pad(InputWidth, InputHeight, Color.Black);
+        });
+
+        // 3. 构建 CHW tensor（原始像素值 [0,1]，mean/std 由 ONNX 图内嵌处理）
+        int bufferSize = 3 * InputHeight * InputWidth;
         float[] pixelBuffer = ArrayPool<float>.Shared.Rent(bufferSize);
         try
         {
-            resized.ProcessPixelRows(accessor =>
+            processed.ProcessPixelRows(accessor =>
             {
-                for (int y = 0; y < h; y++)
+                for (int y = 0; y < InputHeight; y++)
                 {
                     var row = accessor.GetRowSpan(y);
-                    for (int x = 0; x < w; x++)
+                    for (int x = 0; x < InputWidth; x++)
                     {
                         var p = row[x];
-                        int idx = y * w + x;
+                        int idx = y * InputWidth + x;
                         pixelBuffer[idx] = p.R / 255f;
-                        pixelBuffer[h * w + idx] = p.G / 255f;
-                        pixelBuffer[2 * h * w + idx] = p.B / 255f;
+                        pixelBuffer[InputHeight * InputWidth + idx] = p.G / 255f;
+                        pixelBuffer[2 * InputHeight * InputWidth + idx] = p.B / 255f;
                     }
                 }
             });
             var inputTensor = new DenseTensor<float>(pixelBuffer.AsMemory(0, bufferSize), [1, 3, InputHeight, InputWidth]);
 
-            // 3. ONNX 推理
+            // 4. ONNX 推理
             using var results = _session.Run([NamedOnnxValue.CreateFromTensor("input", inputTensor)]);
 
-            // 4. 输出解析 — 特征向量（通过 DenseTensor.Buffer 直接零拷贝输出）
+            // 5. 输出解析 — 特征向量（通过 DenseTensor.Buffer 直接零拷贝输出）
             var resultTensor = (DenseTensor<float>)results[0].AsTensor<float>();
 
             Log.ReIdFeatureExtracted(_logger, resultTensor.Length, sw.Elapsed.TotalMilliseconds);
