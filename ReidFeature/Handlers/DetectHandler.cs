@@ -17,7 +17,7 @@ public static class DetectHandler
     /// </summary>
     /// <param name="request">HTTP 请求体，包含原始图片二进制数据</param>
     /// <param name="detectService">检测编排服务</param>
-    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停)</param>
+    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停), 4=UseGrayscaleReId(灰度ReID降低衣服颜色敏感度)</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="cancellationToken">取消令牌</param>
     public static async IAsyncEnumerable<PersonDetection> HandleImageAsync(
@@ -60,7 +60,7 @@ public static class DetectHandler
     /// </summary>
     /// <param name="request">URL 检测请求，包含 ImageUrl 属性</param>
     /// <param name="detectService">检测编排服务</param>
-    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停)</param>
+    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停), 4=UseGrayscaleReId(灰度ReID降低衣服颜色敏感度)</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="httpClient">用于下载图片的 HTTP 客户端</param>
     /// <param name="cancellationToken">取消令牌</param>
@@ -108,7 +108,7 @@ public static class DetectHandler
     /// <param name="detectService">检测编排服务</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）；≤0 时解码输入流的所有帧</param>
-    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停)</param>
+    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停), 4=UseGrayscaleReId(灰度ReID降低衣服颜色敏感度)</param>
     /// <param name="cancellationToken">取消令牌</param>
     public static IAsyncEnumerable<PersonDetection> HandleH264StreamAsync(
         HttpContext context,
@@ -128,7 +128,7 @@ public static class DetectHandler
     /// <param name="detectService">检测编排服务</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）；≤0 时解码输入流的所有帧</param>
-    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停)</param>
+    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停), 4=UseGrayscaleReId(灰度ReID降低衣服颜色敏感度)</param>
     /// <param name="cancellationToken">取消令牌</param>
     public static IAsyncEnumerable<PersonDetection> HandleH265StreamAsync(
         HttpContext context,
@@ -146,7 +146,7 @@ public static class DetectHandler
     /// </summary>
     /// <param name="request">HTTP 请求体，包含 H264 或 H265 裸流数据</param>
     /// <param name="detectService">检测编排服务</param>
-    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停)</param>
+    /// <param name="flags">检测功能标志位。可组合值: 0=All(全部开启), 1=SkipFaceDetection(跳过人脸检测), 2=StopOnFirstFrameHit(首帧命中即停), 4=UseGrayscaleReId(灰度ReID降低衣服颜色敏感度)</param>
     /// <param name="codec">视频编码格式。可取值: 0=H264(原始 H264 裸流 Annex B), 1=H265(原始 H265/HEVC 裸流)</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）；≤0 时解码输入流的所有帧</param>
     /// <param name="logger">日志记录器</param>

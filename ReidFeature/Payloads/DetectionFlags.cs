@@ -14,4 +14,7 @@ public enum DetectionFlags
 
     /// <summary>视频帧首次检测到目标后立即停止处理后续帧（仅支持流式视频端点）</summary>
     StopOnFirstFrameHit = 0x2,
+
+    /// <summary>对 ReID 使用灰度图，降低衣服颜色敏感度</summary>
+    UseGrayscaleReId = 0x4,
 }

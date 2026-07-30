@@ -51,8 +51,9 @@ public sealed class ReIdExtractor : IDisposable
     /// </summary>
     /// <param name="sourceImage">原始 RGB 图像</param>
     /// <param name="personRect">人物边界框（原图坐标）</param>
+    /// <param name="useGrayscale">是否将人物区域转换为灰度图，降低衣服颜色敏感度</param>
     /// <returns>L2 归一化的特征向量</returns>
-    public byte[] ExtractFeatures(Image<Rgb24> sourceImage, BoundingBox personRect)
+    public byte[] ExtractFeatures(Image<Rgb24> sourceImage, BoundingBox personRect, bool useGrayscale = false)
     {
         var sw = Stopwatch.StartNew();
 
@@ -74,6 +75,12 @@ public sealed class ReIdExtractor : IDisposable
             ctx.Resize(newW, newH, KnownResamplers.Lanczos3);
             ctx.Pad(InputWidth, InputHeight, Color.Black);
         });
+
+        // 2.5 灰度化 — 丢弃颜色信息，使 ReID 特征对衣服颜色不敏感
+        if (useGrayscale)
+        {
+            processed.Mutate(ctx => ctx.Grayscale());
+        }
 
         // 3. 构建 CHW tensor（原始像素值 [0,1]，mean/std 由 ONNX 图内嵌处理）
         int bufferSize = 3 * InputHeight * InputWidth;

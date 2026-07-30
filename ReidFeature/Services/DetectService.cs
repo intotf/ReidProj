@@ -149,7 +149,7 @@ public sealed class DetectService
                 FrameIndex: frameIndex,
                 Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),
                 Confidence: conf,
-                Features: _reid.ExtractFeatures(image, new BoundingBox(x, y, w, h)),
+                Features: _reid.ExtractFeatures(image, new BoundingBox(x, y, w, h), flags.HasFlag(DetectionFlags.UseGrayscaleReId)),
                 Face: face);
         }
     }
