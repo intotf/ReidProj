@@ -22,14 +22,14 @@ namespace ReidFeature.Payloads
         public string Name { get; set; }
 
         /// <summary>
-        /// 人脸特征向量
-        /// </summary>
-        public byte[]? FaceFeatures { get; set; } = [];
-
-        /// <summary>
         /// 人物特征向量
         /// </summary>
         public byte[] ReidFeatures { get; set; } = [];
+
+        /// <summary>
+        /// 四维特征包（全身 ReID + 头肩 ReID + 体型标量 + 步态标量）
+        /// </summary>
+        public TrackFeaturePack? FeaturePack { get; set; }
 
         /// <summary>
         /// 人物信息
@@ -37,27 +37,13 @@ namespace ReidFeature.Payloads
         /// <param name="id">人物 ID</param>
         /// <param name="groupId">所在分组 ID</param>
         /// <param name="name">人物名称</param>
-        /// <param name="faceFeatures">人脸特征向量</param>
         /// <param name="reidFeatures">人物特征向量</param>
-        public Person(string id, string groupId, string name, byte[]? faceFeatures, byte[] reidFeatures)
+        public Person(string id, string groupId, string name, byte[] reidFeatures)
         {
             Id = id;
             GroupId = groupId;
             Name = name;
-            FaceFeatures = faceFeatures;
             ReidFeatures = reidFeatures;
-        }
-
-        /// <summary>
-        /// 计算给定特征向量与人物人脸特征向量的余弦相似度
-        /// </summary>
-        /// <param name="features">要比较的特征向量</param>
-        /// <returns>余弦相似度</returns>
-        public float FaceSimilarity(ReadOnlySpan<byte> features)
-        {
-            return this.FaceFeatures == null || this.FaceFeatures.Length == 0 || features.IsEmpty
-                ? 0f
-                : CosineSimilarity(features, this.FaceFeatures);
         }
 
         /// <summary>
@@ -70,6 +56,17 @@ namespace ReidFeature.Payloads
             return CosineSimilarity(features, this.ReidFeatures);
         }
 
+        /// <summary>
+        /// 计算给定四维特征包与人物特征包的加权融合相似度
+        /// </summary>
+        /// <param name="pack">传入的四维特征包</param>
+        /// <returns>加权融合分数（0.20/0.30/0.30/0.20）</returns>
+        public float FourDimSimilarity(TrackFeaturePack pack)
+        {
+            if (FeaturePack is null)
+                return 0f;
+            return TrackFeaturePack.WeightedCosineSimilarity(pack, FeaturePack);
+        }
 
         private static float CosineSimilarity(ReadOnlySpan<byte> featuresA, ReadOnlySpan<byte> featuresB)
         {

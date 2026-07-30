@@ -13,7 +13,20 @@ using System.Runtime.InteropServices;
 namespace ReidFeature.Services;
 
 /// <summary>
+/// 裁剪类型
+/// </summary>
+public enum CropType
+{
+    /// <summary>全身裁剪（默认，bbox 全范围）</summary>
+    FullBody,
+
+    /// <summary>头肩区域裁剪（取 bbox 上半 38%，换衣鲁棒）</summary>
+    HeadShoulder,
+}
+
+/// <summary>
 /// FastReID ONNX 特征提取器 — 接收原图+人物框，输出归一化特征向量
+/// 支持全身和头肩两种裁剪模式
 /// </summary>
 public sealed class ReIdExtractor : IDisposable
 {
@@ -22,6 +35,9 @@ public sealed class ReIdExtractor : IDisposable
 
     private const int InputHeight = 256;
     private const int InputWidth = 128;
+
+    /// <summary>头肩裁剪比例 — 取 bbox 上半部分的百分比</summary>
+    private const float HeadShoulderRatio = 0.38f;
 
     /// <summary>
     /// 初始化 ReID 特征提取器，加载 ONNX 模型
@@ -51,9 +67,9 @@ public sealed class ReIdExtractor : IDisposable
     /// </summary>
     /// <param name="sourceImage">原始 RGB 图像</param>
     /// <param name="personRect">人物边界框（原图坐标）</param>
-    /// <param name="useGrayscale">是否将人物区域转换为灰度图，降低衣服颜色敏感度</param>
+    /// <param name="cropType">裁剪类型：FullBody（全身）或 HeadShoulder（头肩）</param>
     /// <returns>L2 归一化的特征向量</returns>
-    public byte[] ExtractFeatures(Image<Rgb24> sourceImage, BoundingBox personRect, bool useGrayscale = false)
+    public byte[] ExtractFeatures(Image<Rgb24> sourceImage, BoundingBox personRect, CropType cropType = CropType.FullBody)
     {
         var sw = Stopwatch.StartNew();
 
@@ -62,10 +78,16 @@ public sealed class ReIdExtractor : IDisposable
         int y = Math.Clamp(personRect.Y, 0, sourceImage.Height - 1);
         int w = Math.Max(1, Math.Min(personRect.Width, sourceImage.Width - x));
         int h = Math.Max(1, Math.Min(personRect.Height, sourceImage.Height - y));
+
+        // 头肩模式：仅取 bbox 上半部分
+        if (cropType == CropType.HeadShoulder)
+        {
+            h = Math.Max(1, (int)(h * HeadShoulderRatio));
+        }
+
         var rect = new Rectangle(x, y, w, h);
 
         // 2. 裁剪 → 保持宽高比缩放（长边适配目标尺寸）→ 居中黑色填充至 128×256
-        //    避免直接拉伸破坏人物比例，黑色填充不影响后续归一化
         using var processed = sourceImage.Clone(ctx =>
         {
             ctx.Crop(rect);
@@ -75,12 +97,6 @@ public sealed class ReIdExtractor : IDisposable
             ctx.Resize(newW, newH, KnownResamplers.Lanczos3);
             ctx.Pad(InputWidth, InputHeight, Color.Black);
         });
-
-        // 2.5 灰度化 — 丢弃颜色信息，使 ReID 特征对衣服颜色不敏感
-        if (useGrayscale)
-        {
-            processed.Mutate(ctx => ctx.Grayscale());
-        }
 
         // 3. 构建 CHW tensor（原始像素值 [0,1]，mean/std 由 ONNX 图内嵌处理）
         int bufferSize = 3 * InputHeight * InputWidth;

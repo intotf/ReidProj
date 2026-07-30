@@ -6,10 +6,9 @@ setup_models.py — 完全自包含的模型下载和 ONNX 导出脚本
     python scripts/setup_models.py
 
 输出:
-    models/yolo11n.onnx        — YOLOv11n 人物检测模型
-    models/reid_model.onnx      — FastReID ResNet50-IBN-a 特征提取模型
-    models/scrfd_10g.onnx       — SCRFD-10g 人脸检测模型
-    models/w600k_r50.onnx       — ArcFace 人脸特征提取模型
+    models/yolo11n.onnx            — YOLOv11n 人物检测模型
+    models/reid_model.onnx          — FastReID ResNet50-IBN-a 特征提取模型
+    models/movenet_lightning.onnx   — MoveNet Lightning 姿态估计模型
 """
 import os
 import sys
@@ -75,38 +74,6 @@ def export_yolo():
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 3. SCRFD Face → ONNX（从 buffalo_l Model Pack 提取）
-# ═══════════════════════════════════════════════════════════════════
-def export_scrfd_face():
-    face_onnx = MODELS_DIR / "scrfd_10g.onnx"
-    face_rec_onnx = MODELS_DIR / "w600k_r50.onnx"
-    if face_onnx.exists() and face_rec_onnx.exists():
-        log(f"✅ 人脸模型已存在，跳过")
-        return
-
-    log("=" * 50)
-    log("Step: 从 InsightFace buffalo_l 提取 SCRFD-10g + ArcFace ONNX")
-    log("=" * 50)
-
-    import urllib.request
-
-    url = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
-    log(f"下载 buffalo_l.zip (约 84 MB)...")
-    resp = urllib.request.urlopen(url)
-    data = resp.read()
-    log(f"  下载完成 ({len(data) / 1024 / 1024:.1f} MB)")
-    with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        log("从 zip 中提取 det_10g.onnx ...")
-        zf.extract("det_10g.onnx", MODELS_DIR)
-        log("从 zip 中提取 w600k_r50.onnx ...")
-        zf.extract("w600k_r50.onnx", MODELS_DIR)
-    (MODELS_DIR / "det_10g.onnx").rename(face_onnx)
-    log(f"✅ SCRFD-10g ONNX 已就绪: {face_onnx} ({round(face_onnx.stat().st_size / 1024 / 1024, 1)} MB)")
-    rec_size_mb = round(face_rec_onnx.stat().st_size / 1024 / 1024, 1)
-    log(f"✅ ArcFace ONNX 已就绪:       {face_rec_onnx} ({rec_size_mb} MB)")
-
-
-# ═══════════════════════════════════════════════════════════════════
 # 2. FastReID → ONNX
 # ═══════════════════════════════════════════════════════════════════
 def export_reid():
@@ -116,7 +83,7 @@ def export_reid():
         return
 
     log("=" * 50)
-    log("Step 2/2: 导出 FastReID ResNet50-IBN-a → ONNX")
+    log("Step 2/3: 导出 FastReID ResNet50-IBN-a → ONNX")
     log("=" * 50)
 
     # 克隆 FastReID 仓库
@@ -278,13 +245,68 @@ def _do_export_reid(output_path: Path):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 3. MoveNet Lightning → ONNX 直接下载
+# ═══════════════════════════════════════════════════════════════════
+def export_movenet():
+    pose_onnx = MODELS_DIR / "movenet_lightning.onnx"
+    if pose_onnx.exists():
+        log(f"✅ MoveNet ONNX 已存在，跳过: {pose_onnx}")
+        return
+
+    log("=" * 50)
+    log("Step 3/3: 下载 MoveNet Lightning → ONNX")
+    log("=" * 50)
+
+    import urllib.request
+
+    # 从 PINTO Model Zoo 下载预编译 ONNX
+    url = "https://github.com/PINTO0309/PINTO_model_zoo/raw/main/306_MoveNet_Lightning/saved_model/model_float32.onnx"
+    log(f"下载 MoveNet Lightning ONNX (~2.5 MB)...")
+    try:
+        urllib.request.urlretrieve(url, pose_onnx)
+        size_mb = round(pose_onnx.stat().st_size / (1024 * 1024), 1)
+        log(f"✅ MoveNet Lightning ONNX 已下载: {pose_onnx} ({size_mb} MB)")
+    except Exception as e:
+        log(f"⚠️ PINTO 仓库下载失败 ({e})")
+        log("尝试从 TF Hub 转换（需安装 tensorflow）...")
+        run_cmd(
+            [sys.executable, "-m", "pip", "install", "-q",
+             "tensorflow", "tensorflow-hub", "onnx", "tf2onnx"],
+            desc="安装 TensorFlow + tf2onnx"
+        )
+        _convert_movenet_from_tf(pose_onnx)
+
+
+def _convert_movenet_from_tf(output_path: Path):
+    """从 TF Hub 下载 MoveNet Lightning 并转换为 ONNX"""
+    import tensorflow as tf
+    import tensorflow_hub as hub
+    import tf2onnx
+
+    log("从 TF Hub 加载 MoveNet Lightning...")
+    model = hub.load("https://tfhub.dev/google/movenet/singlepose/lightning/4")
+    model = model.signatures['serving_default']
+
+    dummy_input = tf.constant(0., shape=[1, 192, 192, 3])
+    log("转换为 ONNX（使用 tf2onnx）...")
+    onnx_model, _ = tf2onnx.convert.from_function(
+        model,
+        input_signature=[tf.TensorSpec([1, 192, 192, 3], tf.float32, name='input')],
+        opset=18,
+        output_path=str(output_path),
+    )
+    size_mb = round(output_path.stat().st_size / (1024 * 1024), 1)
+    log(f"✅ MoveNet Lightning ONNX 已转换: {output_path} ({size_mb} MB)")
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════
 def main():
-    parser = argparse.ArgumentParser(description="下载并导出 YOLOv11 + FastReID + 人脸检测 模型为 ONNX")
+    parser = argparse.ArgumentParser(description="下载并导出 YOLOv11 + FastReID + MoveNet 模型为 ONNX")
     parser.add_argument("--skip-yolo", action="store_true", help="跳过 YOLO 人物检测导出")
     parser.add_argument("--skip-reid", action="store_true", help="跳过 ReID 导出")
-    parser.add_argument("--skip-face", action="store_true", help="跳过人脸检测导出")
+    parser.add_argument("--skip-pose", action="store_true", help="跳过 MoveNet 姿态估计导出")
     args = parser.parse_args()
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -299,17 +321,16 @@ def main():
     else:
         log("跳过 ReID 导出")
 
-    if not args.skip_face:
-        export_scrfd_face()
+    if not args.skip_pose:
+        export_movenet()
     else:
-        log("跳过人脸检测导出")
+        log("跳过姿态估计导出")
 
     log("=" * 50)
     log("🎉 全部完成！")
     log(f"   - {MODELS_DIR / 'yolo11n.onnx'}")
     log(f"   - {MODELS_DIR / 'reid_model.onnx'}")
-    log(f"   - {MODELS_DIR / 'scrfd_10g.onnx'}")
-    log(f"   - {MODELS_DIR / 'w600k_r50.onnx'}")
+    log(f"   - {MODELS_DIR / 'movenet_lightning.onnx'}")
     log("=" * 50)
 
 

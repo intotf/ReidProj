@@ -7,210 +7,134 @@ using SixLabors.ImageSharp.Processing;
 namespace ReidFeature.Services;
 
 /// <summary>
-/// 检测编排服务：YOLO 人物检测 → ReID 特征提取 → 人脸检测（可选）→ 人脸特征提取（可选）
+/// 检测编排服务：YOLO 人物检测 → ByteTrack 跟踪 → TrackFusion 四维特征融合
 /// </summary>
 public sealed class DetectService
 {
     private readonly YoloDetector _yolo;
-    private readonly ReIdExtractor _reid;
-    private readonly FaceDetector _faceDetector;
-    private readonly FaceExtractor _faceExtractor;
+    private readonly ByteTrackTracker _tracker;
+    private readonly TrackFusionService _fusion;
     private readonly ILogger<DetectService> _logger;
 
-    /// <summary>人脸在原图中的最小尺寸（像素），低于此值的人脸特征不可靠，将被忽略</summary>
-    private const int MinFaceSize = 50;
-
     /// <summary>
-    /// 检测编排服务
+    /// 当前视频流的帧缓存：trackId → List<(原图, bbox, 置信度)>
     /// </summary>
-    /// <param name="yolo"></param>
-    /// <param name="reid"></param>
-    /// <param name="faceDetector"></param>
-    /// <param name="faceExtractor"></param>
-    /// <param name="logger"></param>
-    public DetectService(YoloDetector yolo, ReIdExtractor reid, FaceDetector faceDetector, FaceExtractor faceExtractor, ILogger<DetectService> logger)
+    private readonly Dictionary<int, List<(Image<Rgb24> Frame, Rectangle Bbox, float Score)>> _trackFrames = [];
+
+    public DetectService(
+        YoloDetector yolo,
+        ByteTrackTracker tracker,
+        TrackFusionService fusion,
+        ILogger<DetectService> logger)
     {
         _yolo = yolo;
-        _reid = reid;
-        _faceDetector = faceDetector;
-        _faceExtractor = faceExtractor;
+        _tracker = tracker;
+        _fusion = fusion;
         _logger = logger;
     }
 
     /// <summary>
-    /// 对输入图像执行完整检测管线，并将检测结果可视化保存到 out/ 目录
+    /// 处理一帧视频图像：YOLO 检测 → ByteTrack 跟踪
+    /// 将当前帧的检测结果按 TrackId 缓存
     /// </summary>
-    /// <param name="image">输入 RGB 图像</param>
-    /// <param name="flags">检测功能标志位</param>
-    /// <param name="frameIndex">帧索引（视频场景下传入当前帧序号；非视频场景默认为 0）</param>
-    /// <returns>检测到的人物列表（可能为空）</returns>
-    public IEnumerable<PersonDetection> DetectPersons(Image<Rgb24> image, DetectionFlags flags, int frameIndex = 0)
-    {
-#if DEBUG
-        // 先收集所有检测结果
-        var results = new List<PersonDetection>();
-#endif
-
-        using var enumerator = RunPipeline(image, flags, frameIndex).GetEnumerator();
-        while (true)
-        {
-            var item = default(PersonDetection);
-            try
-            {
-                if (!enumerator.MoveNext())
-                {
-                    break;
-                }
-
-                item = enumerator.Current;
-            }
-            catch (Exception ex)
-            {
-                Log.DetectPipelineFailed(_logger, ex);
-                break;
-            }
-
-            if (item is not null)
-            {
-#if DEBUG
-                results.Add(item);
-#endif
-                yield return item;
-            }
-        }
-
-        // 可视化：绘制人物框（绿色）和人脸框（红色）
-#if DEBUG
-        if (results.Count > 0)
-        {
-            using var annotated = image.Clone();
-            DrawDetectionBoxes(annotated, results);
-            var outDir = Path.Combine(AppContext.BaseDirectory, "out");
-            Directory.CreateDirectory(outDir);
-            var path = Path.Combine(outDir, $"{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
-            annotated.SaveAsPng(path);
-        }
-#endif
-
-    }
-
-    /// <summary>
-    /// 对输入图像执行完整检测管线
-    /// </summary>
-    /// <param name="image">输入 RGB 图像</param>
-    /// <param name="flags">检测功能标志位</param>
-    /// <param name="frameIndex">帧索引</param>
-    /// <returns>检测到的人物列表（可能为空）</returns>
-    private IEnumerable<PersonDetection> RunPipeline(Image<Rgb24> image, DetectionFlags flags, int frameIndex)
+    /// <param name="image">当前帧 RGB 图像</param>
+    /// <param name="frameIndex">帧序号</param>
+    /// <returns>跟踪结果列表 (trackId, bbox, 置信度)</returns>
+    public List<(int TrackId, Rectangle Bbox, float Score)> ProcessVideoFrame(Image<Rgb24> image, int frameIndex)
     {
         var detections = _yolo.DetectPersons(image);
         if (detections.Count == 0)
+            return [];
+
+        var input = detections.Select(d => (d.Bbox, d.Confidence)).ToList();
+        var tracked = _tracker.Update(input, frameIndex);
+
+        var results = new List<(int, Rectangle, float)>();
+        for (int i = 0; i < tracked.Count; i++)
         {
-            yield break;
+            var (trackId, bbox) = tracked[i];
+            float score = detections.FirstOrDefault(d => d.Bbox == bbox).Confidence;
+
+            // 缓存到 Track 队列
+            if (!_trackFrames.ContainsKey(trackId))
+                _trackFrames[trackId] = [];
+            _trackFrames[trackId].Add((image.Clone(ctx => { }), bbox, score));
+
+            results.Add((trackId, bbox, score));
         }
+
+        return results;
+    }
+
+    /// <summary>
+    /// 获取所有已完成 Track 的四维特征融合结果
+    /// 需在视频流处理完毕后调用
+    /// </summary>
+    /// <param name="minFrames">Track 最小存活帧数门槛</param>
+    /// <returns>人物检测结果列表（包含 TrackFeaturePack）</returns>
+    public List<PersonDetection> FlushCompletedTracks(int minFrames = 10)
+    {
+        var completed = _tracker.FlushCompletedTracks(minFrames);
+        var results = new List<PersonDetection>();
+
+        for (int i = 0; i < completed.Count; i++)
+        {
+            var (trackId, startFrame, endFrame, firstBbox, lastBbox, centers) = completed[i];
+
+            if (!_trackFrames.TryGetValue(trackId, out var frames))
+                continue;
+
+            // 该 Track 的帧已经通过 ProcessVideoFrame 缓存
+            var pack = _fusion.FuseTrack(trackId, frames);
+
+            // 释放缓存的帧
+            foreach (var (frame, _, _) in frames)
+                frame.Dispose();
+
+            results.Add(new PersonDetection(
+                FrameIndex: startFrame,
+                Bbox: new BoundingBox(firstBbox.X, firstBbox.Y, firstBbox.Width, firstBbox.Height),
+                Confidence: 1.0f,
+                Features: pack.VecCloth,
+                FeaturePack: pack));
+        }
+
+        _trackFrames.Clear();
+        return results;
+    }
+
+    /// <summary>
+    /// 直接处理单张图像中的所有人（非视频流模式）
+    /// 注意：请勿与 ProcessVideoFrame 混用
+    /// </summary>
+    public List<PersonDetection> DetectPersons(Image<Rgb24> image, DetectionFlags flags)
+    {
+        var detections = _yolo.DetectPersons(image);
+        var results = new List<PersonDetection>();
 
         for (int i = 0; i < detections.Count; i++)
         {
             var (box, conf) = detections[i];
-            int x = Math.Clamp(box.X, 0, image.Width - 1);
-            int y = Math.Clamp(box.Y, 0, image.Height - 1);
-            int w = Math.Max(1, Math.Min(box.Width, image.Width - x));
-            int h = Math.Max(1, Math.Min(box.Height, image.Height - y));
 
-            FaceDetection? face = null;
-            if (!flags.HasFlag(DetectionFlags.SkipFaceDetection))
-            {
-                using var cropped = image.Clone(ctx => ctx.Crop(new Rectangle(x, y, w, h)));
+            var boundingBox = new BoundingBox(box.X, box.Y, box.Width, box.Height);
 
-                face = _faceDetector.DetectBestFace(cropped, box.X, box.Y);
-                if (face is { } fd)
-                {
-                    // 门铃广角场景小人脸特征不可靠，低于阈值则放弃人脸，仅依赖 ReID
-                    if (fd.Bbox.Width < MinFaceSize || fd.Bbox.Height < MinFaceSize)
-                    {
-                        face = null;
-                    }
-                    else
-                    {
-                        // 从原图中裁剪人脸区域提取特征
-                        int fx = Math.Clamp(fd.Bbox.X, 0, image.Width - 1);
-                        int fy = Math.Clamp(fd.Bbox.Y, 0, image.Height - 1);
-                        int fw = Math.Max(1, Math.Min(fd.Bbox.Width, image.Width - fx));
-                        int fh = Math.Max(1, Math.Min(fd.Bbox.Height, image.Height - fy));
-
-                        using var faceCrop = image.Clone(ctx => ctx.Crop(new Rectangle(fx, fy, fw, fh)));
-                        var features = _faceExtractor.ExtractFeatures(faceCrop);
-                        face = fd with { Features = features };
-                    }
-                }
-            }
-
-            yield return new PersonDetection(
-                FrameIndex: frameIndex,
-                Bbox: new BoundingBox(box.X, box.Y, box.Width, box.Height),
+            results.Add(new PersonDetection(
+                FrameIndex: 0,
+                Bbox: boundingBox,
                 Confidence: conf,
-                Features: _reid.ExtractFeatures(image, new BoundingBox(x, y, w, h), flags.HasFlag(DetectionFlags.UseGrayscaleReId)),
-                Face: face);
+                Features: [],
+                FeaturePack: null));
         }
+
+        return results;
     }
 
     /// <summary>
-    /// 在图像上绘制人物边界框（绿色）和人脸边界框（红色）
+    /// 重置跟踪器和帧缓存（新视频流开始前调用）
     /// </summary>
-    private static void DrawDetectionBoxes(Image<Rgb24> image, List<PersonDetection> detections)
+    public void Reset()
     {
-        var personColor = new Rgb24(0, 255, 0);
-        var faceColor = new Rgb24(255, 0, 0);
-        const int thickness = 2;
-
-        foreach (var det in detections)
-        {
-            DrawRectangle(image, det.Bbox, personColor, thickness);
-
-            if (det.Face is { } face)
-            {
-                DrawRectangle(image, face.Bbox, faceColor, thickness);
-            }
-        }
-    }
-
-    /// <summary>
-    /// 在图像上绘制一个矩形边框
-    /// </summary>
-    private static void DrawRectangle(Image<Rgb24> image, BoundingBox bbox, Rgb24 color, int thickness)
-    {
-        int imgW = image.Width;
-        int imgH = image.Height;
-        int x1 = Math.Clamp(bbox.X, 0, imgW - 1);
-        int y1 = Math.Clamp(bbox.Y, 0, imgH - 1);
-        int x2 = Math.Clamp(bbox.X + bbox.Width - 1, 0, imgW - 1);
-        int y2 = Math.Clamp(bbox.Y + bbox.Height - 1, 0, imgH - 1);
-
-        for (int t = 0; t < thickness; t++)
-        {
-            // 上边
-            int topY = y1 + t;
-            if (topY < imgH)
-                for (int x = x1 + t; x <= x2 - t; x++)
-                    image[x, topY] = color;
-
-            // 下边
-            int bottomY = y2 - t;
-            if (bottomY >= 0)
-                for (int x = x1 + t; x <= x2 - t; x++)
-                    image[x, bottomY] = color;
-
-            // 左边
-            int leftX = x1 + t;
-            if (leftX < imgW)
-                for (int y = y1 + t + 1; y <= y2 - t - 1; y++)
-                    image[leftX, y] = color;
-
-            // 右边
-            int rightX = x2 - t;
-            if (rightX >= 0)
-                for (int y = y1 + t + 1; y <= y2 - t - 1; y++)
-                    image[rightX, y] = color;
-        }
+        _tracker.Reset();
+        _trackFrames.Clear();
     }
 }

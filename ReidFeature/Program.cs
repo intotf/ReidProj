@@ -1,4 +1,5 @@
 using ReidFeature.Handlers;
+using ReidFeature.Payloads;
 using ReidFeature.Services;
 
 namespace ReidFeature
@@ -34,12 +35,13 @@ namespace ReidFeature
             // ── 注册服务 ──────────────────────────────────
             builder.Services.AddSingleton<YoloDetector>();
             builder.Services.AddSingleton<ReIdExtractor>();
-            builder.Services.AddSingleton<FaceDetector>();
-            builder.Services.AddSingleton<FaceExtractor>();
+            builder.Services.AddSingleton<PoseEstimator>();
+            builder.Services.AddSingleton<ByteTrackTracker>();
+            builder.Services.AddSingleton<TrackFusionService>();
+            builder.Services.AddSingleton<FamilyGalleryService>();
+            builder.Services.AddSingleton<IFamilyMemberProvider>(sp =>
+                sp.GetRequiredService<FamilyGalleryService>());
             builder.Services.AddSingleton<DetectService>();
-            builder.Services.AddSingleton<IPersonGroupProvider, MockPersonGroupProvider>();
-
-            builder.Services.AddHttpClient();
 
             builder.Services.AddOpenApi();
 
@@ -56,13 +58,7 @@ namespace ReidFeature
             app.Map("/", context => context.Response.WriteAsync("HealthCheck"))
                .WithName("HealthCheck");
 
-            app.MapPost("/detect/image", DetectHandler.HandleImageAsync)
-               .WithName("DetectImage")
-               .Accepts<byte[]>("application/octet-stream");
-
-            app.MapPost("/detect/imageurl", DetectHandler.HandleImageUrlAsync)
-               .WithName("DetectImageUrl");
-
+            // ── 检测端点（仅视频流） ──────────────────────
             app.MapPost("/detect/h264stream", DetectHandler.HandleH264StreamAsync)
                .WithName("DetectH264Stream")
                .Accepts<byte[]>("application/octet-stream");
@@ -71,13 +67,7 @@ namespace ReidFeature
                .WithName("DetectH265Stream")
                .Accepts<byte[]>("application/octet-stream");
 
-            app.MapPost("/recognize/image/{groupId}", RecognizeHandler.HandleImageAsync)
-               .WithName("RecognizeImage")
-               .Accepts<byte[]>("application/octet-stream");
-
-            app.MapPost("/recognize/imageurl/{groupId}", RecognizeHandler.HandleImageUrlAsync)
-               .WithName("RecognizeImageUrl");
-
+            // ── 识别端点（仅视频流，返回单个最佳匹配） ────
             app.MapPost("/recognize/h264stream/{groupId}", RecognizeHandler.HandleH264StreamAsync)
                .WithName("RecognizeH264Stream")
                .Accepts<byte[]>("application/octet-stream");
@@ -85,6 +75,30 @@ namespace ReidFeature
             app.MapPost("/recognize/h265stream/{groupId}", RecognizeHandler.HandleH265StreamAsync)
                .WithName("RecognizeH265Stream")
                .Accepts<byte[]>("application/octet-stream");
+
+            // ── 家庭成员管理端点 ─────────────────────────
+            app.MapPost("/family/enroll/{groupId}/{memberName}", EnrollmentHandler.HandleEnrollAsync)
+               .WithName("FamilyEnroll")
+               .Accepts<byte[]>("application/octet-stream");
+
+            app.MapDelete("/family/{groupId}/{memberId}", async (
+                string groupId,
+                string memberId,
+                IFamilyMemberProvider provider,
+                CancellationToken ct) =>
+            {
+                var ok = await provider.DeleteAsync(groupId, memberId, ct);
+                return ok ? Results.Ok() : Results.NotFound();
+            }).WithName("FamilyDelete");
+
+            app.MapGet("/family/{groupId}", async (
+                string groupId,
+                IFamilyMemberProvider provider,
+                CancellationToken ct) =>
+            {
+                var members = await provider.ListAsync(groupId, ct);
+                return Results.Ok(members);
+            }).WithName("FamilyList");
 
             app.Run();
         }
