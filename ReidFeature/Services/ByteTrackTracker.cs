@@ -359,7 +359,7 @@ public sealed class ByteTrackTracker
             return _x;
         }
 
-        public void Update(float[] z)
+        public void Update(ReadOnlySpan<float> z)
         {
             // y = z - _H @ _x
             var Hx = new float[4];
@@ -416,7 +416,7 @@ public sealed class ByteTrackTracker
             return result;
         }
 
-        private static float[] Multiply(float[,] a, float[] v)
+        private static float[] Multiply(float[,] a, ReadOnlySpan<float> v)
         {
             int n = a.GetLength(0), m = a.GetLength(1);
             var result = new float[n];

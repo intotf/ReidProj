@@ -4,6 +4,8 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System.Diagnostics;
+using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 
 namespace ReidFeature.Services;
 
@@ -134,32 +136,30 @@ public sealed class TrackFusionService
     /// <summary>
     /// 加权融合特征向量 — 逐元素加权平均后 L2 归一化
     /// </summary>
-    private static byte[] WeightedAverageFeatures(byte[][] features, ReadOnlySpan<float> weights, float totalWeight)
+    private static byte[] WeightedAverageFeatures(ReadOnlySpan<byte[]> features, ReadOnlySpan<float> weights, float totalWeight)
     {
         if (features.Length == 0 || features[0].Length == 0)
             return [];
 
         int dim = features[0].Length;
         var avg = new float[dim / 4];
+        var scaled = new float[avg.Length];
 
         for (int i = 0; i < features.Length; i++)
         {
             if (features[i] == null || features[i].Length != dim) continue;
             float w = weights[i] / totalWeight;
-            var vec = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(features[i]);
-            for (int j = 0; j < avg.Length; j++)
-                avg[j] += vec[j] * w;
+            var vec = MemoryMarshal.Cast<byte, float>(features[i]);
+            TensorPrimitives.Multiply(vec, w, scaled);
+            TensorPrimitives.Add(avg, scaled, avg);
         }
 
         // L2 归一化
-        float norm = MathF.Sqrt(avg.Sum(v => v * v));
+        float norm = TensorPrimitives.Norm(avg);
         if (norm > 1e-8f)
-        {
-            for (int j = 0; j < avg.Length; j++)
-                avg[j] /= norm;
-        }
+            TensorPrimitives.Divide(avg, norm, avg);
 
-        return System.Runtime.InteropServices.MemoryMarshal.Cast<float, byte>(avg).ToArray();
+        return MemoryMarshal.Cast<float, byte>(avg).ToArray();
     }
 
     /// <summary>
@@ -183,7 +183,7 @@ public sealed class TrackFusionService
     /// 步频 = 中心点垂直振荡的零交叉频率
     /// 摆幅 = 水平位置的标准差
     /// </summary>
-    private static float[] ComputeGaitSignals(PointF[] centers)
+    private static float[] ComputeGaitSignals(ReadOnlySpan<PointF> centers)
     {
         // 最少 3 个轨迹点：步频零交叉需要连续两个差分，摆幅需要标准差
         if (centers.Length < 3)
@@ -204,8 +204,16 @@ public sealed class TrackFusionService
         float stepFrequency = zeroCrossings / 2f;
 
         // 水平摆幅：X 位置的标准差
-        float meanX = centers.Average(c => c.X);
-        float varianceX = centers.Sum(c => (c.X - meanX) * (c.X - meanX)) / centers.Length;
+        float meanX = 0f;
+        for (int i = 0; i < centers.Length; i++)
+            meanX += centers[i].X;
+        meanX /= centers.Length;
+         
+
+        float varianceX = 0f;
+        for (int i = 0; i < centers.Length; i++)
+            varianceX += (centers[i].X - meanX) * (centers[i].X - meanX);
+        varianceX /= centers.Length;
         float swingAmplitude = MathF.Sqrt(varianceX);
 
         return [stepFrequency, swingAmplitude];

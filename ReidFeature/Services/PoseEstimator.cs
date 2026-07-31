@@ -158,9 +158,9 @@ public sealed class PoseEstimator : IDisposable
     /// <summary>
     /// 从关键点计算体型标量（换衣不变的生物特征）
     /// </summary>
-    /// <param name="keypoints">17 个关键点数组</param>
+    /// <param name="keypoints">17 个关键点（ReadOnlySpan）</param>
     /// <returns>float[2] = [头身比, 肩髋比]</returns>
-    public float[] CalculateBodySignals((float Y, float X, float Confidence)[] keypoints)
+    public float[] CalculateBodySignals(ReadOnlySpan<(float Y, float X, float Confidence)> keypoints)
     {
         // 仅使用置信度 > 0.3 的关键点
         float noseY = keypoints[Nose].Confidence > 0.3f ? keypoints[Nose].Y : float.NaN;

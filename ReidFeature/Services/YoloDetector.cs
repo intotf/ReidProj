@@ -7,6 +7,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace ReidFeature.Services;
 
@@ -142,7 +143,7 @@ public sealed class YoloDetector : IDisposable
             }
 
             // 6. NMS
-            var resultsList = Nms(candidates);
+            var resultsList = Nms(CollectionsMarshal.AsSpan(candidates));
 
             Log.YoloDetectionCompleted(_logger, resultsList.Count, sw.Elapsed.TotalMilliseconds);
             return resultsList;
@@ -175,37 +176,36 @@ public sealed class YoloDetector : IDisposable
     /// 将 Image 类型图像归一化为模型输入的 Tensor 格式
     /// </summary>
     /// <param name="image">输入图像（已进行 Letterbox Resize）</param>
-    /// <param name="tensorData">预分配的浮点数数组，大小应为 3 × 640 × 640</param>
-    private static void NormalizeToTensor(Image<Rgb24> image, float[] tensorData)
+    /// <param name="tensorData">预分配的浮点数 Span，大小应为 3 × 640 × 640</param>
+    private static void NormalizeToTensor(Image<Rgb24> image, Span<float> tensorData)
     {
         int h = image.Height, w = image.Width;
-        image.ProcessPixelRows(accessor =>
+        var frame = image.Frames[0];
+        var buffer = frame.PixelBuffer;
+        for (int y = 0; y < h; y++)
         {
-            for (int y = 0; y < h; y++)
+            var row = buffer.DangerousGetRowSpan(y);
+            for (int x = 0; x < w; x++)
             {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < w; x++)
-                {
-                    var p = row[x];
-                    int idx = y * w + x;
-                    tensorData[idx] = (p.R / 255f - Mean[0]) / Std[0];
-                    tensorData[h * w + idx] = (p.G / 255f - Mean[1]) / Std[1];
-                    tensorData[2 * h * w + idx] = (p.B / 255f - Mean[2]) / Std[2];
-                }
+                var p = row[x];
+                int idx = y * w + x;
+                tensorData[idx] = (p.R / 255f - Mean[0]) / Std[0];
+                tensorData[h * w + idx] = (p.G / 255f - Mean[1]) / Std[1];
+                tensorData[2 * h * w + idx] = (p.B / 255f - Mean[2]) / Std[2];
             }
-        });
+        }
     }
 
-    private static List<(Rectangle Bbox, float Confidence)> Nms(List<(float X, float Y, float W, float H, float Score)> candidates)
+    private static List<(Rectangle Bbox, float Confidence)> Nms(Span<(float X, float Y, float W, float H, float Score)> candidates)
     {
         var selected = new List<(Rectangle Bbox, float Confidence)>();
-        if (candidates.Count == 0)
+        if (candidates.IsEmpty)
             return selected;
 
         // 按置信度降序排序
         candidates.Sort((a, b) => b.Score.CompareTo(a.Score));
 
-        int count = candidates.Count;
+        int count = candidates.Length;
         var removed = new bool[count];
 
         for (int i = 0; i < count; i++)
