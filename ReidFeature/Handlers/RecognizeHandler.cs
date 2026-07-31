@@ -33,12 +33,11 @@ namespace ReidFeature.Handlers
             ILogger<Program> logger,
             string groupId,
             int frameIntervalSeconds = 5,
-            DetectionFlags flags = DetectionFlags.All,
             CancellationToken cancellationToken = default)
         {
             return await RecognizeVideoAsync(
                 familyProvider, context.Request, detectService, logger,
-                groupId, VideoCodec.H264, frameIntervalSeconds, flags, cancellationToken);
+                groupId, VideoCodec.H264, frameIntervalSeconds, cancellationToken);
         }
 
         /// <summary>
@@ -51,12 +50,11 @@ namespace ReidFeature.Handlers
             ILogger<Program> logger,
             string groupId,
             int frameIntervalSeconds = 5,
-            DetectionFlags flags = DetectionFlags.All,
             CancellationToken cancellationToken = default)
         {
             return await RecognizeVideoAsync(
                 familyProvider, context.Request, detectService, logger,
-                groupId, VideoCodec.H265, frameIntervalSeconds, flags, cancellationToken);
+                groupId, VideoCodec.H265, frameIntervalSeconds, cancellationToken);
         }
 
         private static async Task<PersonRecognition> RecognizeVideoAsync(
@@ -67,7 +65,6 @@ namespace ReidFeature.Handlers
             string groupId,
             VideoCodec codec,
             int frameIntervalSeconds,
-            DetectionFlags flags,
             CancellationToken cancellationToken)
         {
             if (request.ContentLength == null || request.ContentLength == 0)
@@ -84,7 +81,6 @@ namespace ReidFeature.Handlers
             }
 
             // 2. 解码视频流，逐帧处理
-            detectService.Reset();
             int frameIdx = 0;
 
             var enumerable = VideoDecoder.DecodeFramesAsync(

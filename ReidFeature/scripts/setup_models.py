@@ -245,7 +245,7 @@ def _do_export_reid(output_path: Path):
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 3. MoveNet Lightning → ONNX 直接下载
+# 3. MoveNet Lightning → ONNX
 # ═══════════════════════════════════════════════════════════════════
 def export_movenet():
     pose_onnx = MODELS_DIR / "movenet_lightning.onnx"
@@ -254,49 +254,50 @@ def export_movenet():
         return
 
     log("=" * 50)
-    log("Step 3/3: 下载 MoveNet Lightning → ONNX")
+    log("Step 3/3: 从 S3 下载 MoveNet Lightning ONNX")
     log("=" * 50)
 
     import urllib.request
+    import tarfile
+    import shutil
 
-    # 从 PINTO Model Zoo 下载预编译 ONNX
-    url = "https://github.com/PINTO0309/PINTO_model_zoo/raw/main/306_MoveNet_Lightning/saved_model/model_float32.onnx"
-    log(f"下载 MoveNet Lightning ONNX (~2.5 MB)...")
+    s3_url = "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/115_MoveNet/lightning_v4/resources.tar.gz"
+    tar_path = MODELS_DIR / "resources.tar.gz"
+    log(f"从 S3 下载 MoveNet Lightning v4 (~5 MB)...")
     try:
-        urllib.request.urlretrieve(url, pose_onnx)
-        size_mb = round(pose_onnx.stat().st_size / (1024 * 1024), 1)
-        log(f"✅ MoveNet Lightning ONNX 已下载: {pose_onnx} ({size_mb} MB)")
+        urllib.request.urlretrieve(s3_url, tar_path)
     except Exception as e:
-        log(f"⚠️ PINTO 仓库下载失败 ({e})")
-        log("尝试从 TF Hub 转换（需安装 tensorflow）...")
-        run_cmd(
-            [sys.executable, "-m", "pip", "install", "-q",
-             "tensorflow", "tensorflow-hub", "onnx", "tf2onnx"],
-            desc="安装 TensorFlow + tf2onnx"
-        )
-        _convert_movenet_from_tf(pose_onnx)
+        log(f"❌ S3 下载失败: {e}")
+        sys.exit(1)
 
+    log("解压 resources.tar.gz ...")
+    with tarfile.open(tar_path, "r:gz") as tar:
+        tar.extractall(path=MODELS_DIR)
+    tar_path.unlink()
 
-def _convert_movenet_from_tf(output_path: Path):
-    """从 TF Hub 下载 MoveNet Lightning 并转换为 ONNX"""
-    import tensorflow as tf
-    import tensorflow_hub as hub
-    import tf2onnx
+    # 递归查找解压后的 model_float32.onnx（可能在子目录 saved_model/ 中）
+    extracted_onnx = None
+    for f in MODELS_DIR.rglob("model_float32.onnx"):
+        extracted_onnx = f
+        break
 
-    log("从 TF Hub 加载 MoveNet Lightning...")
-    model = hub.load("https://tfhub.dev/google/movenet/singlepose/lightning/4")
-    model = model.signatures['serving_default']
+    if extracted_onnx is None:
+        log("❌ 解压后未找到 model_float32.onnx")
+        sys.exit(1)
 
-    dummy_input = tf.constant(0., shape=[1, 192, 192, 3])
-    log("转换为 ONNX（使用 tf2onnx）...")
-    onnx_model, _ = tf2onnx.convert.from_function(
-        model,
-        input_signature=[tf.TensorSpec([1, 192, 192, 3], tf.float32, name='input')],
-        opset=18,
-        output_path=str(output_path),
-    )
-    size_mb = round(output_path.stat().st_size / (1024 * 1024), 1)
-    log(f"✅ MoveNet Lightning ONNX 已转换: {output_path} ({size_mb} MB)")
+    if extracted_onnx != pose_onnx:
+        shutil.move(str(extracted_onnx), str(pose_onnx))
+
+    # 清理解压残留的其他文件和目录
+    for item in MODELS_DIR.iterdir():
+        if item != pose_onnx and item.name != "yolo11n.onnx" and item.name != "reid_model.onnx":
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+            else:
+                item.unlink(missing_ok=True)
+
+    size_mb = round(pose_onnx.stat().st_size / (1024 * 1024), 1)
+    log(f"✅ MoveNet Lightning ONNX 已下载并解压: {pose_onnx} ({size_mb} MB)")
 
 
 # ═══════════════════════════════════════════════════════════════════

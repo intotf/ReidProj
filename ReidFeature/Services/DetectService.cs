@@ -70,11 +70,10 @@ public sealed class DetectService
     /// 获取所有已完成 Track 的四维特征融合结果
     /// 需在视频流处理完毕后调用
     /// </summary>
-    /// <param name="minFrames">Track 最小存活帧数门槛</param>
     /// <returns>人物检测结果列表（包含 TrackFeaturePack）</returns>
-    public List<PersonDetection> FlushCompletedTracks(int minFrames = 10)
+    public List<PersonDetection> FlushCompletedTracks()
     {
-        var completed = _tracker.FlushCompletedTracks(minFrames);
+        var completed = _tracker.FlushCompletedTracks();
         var results = new List<PersonDetection>();
 
         for (int i = 0; i < completed.Count; i++)
@@ -85,7 +84,7 @@ public sealed class DetectService
                 continue;
 
             // 该 Track 的帧已经通过 ProcessVideoFrame 缓存
-            var pack = _fusion.FuseTrack(trackId, frames);
+            var pack = _fusion.FuseTrack(trackId, frames, centers);
 
             // 释放缓存的帧
             foreach (var (frame, _, _) in frames)
@@ -107,7 +106,7 @@ public sealed class DetectService
     /// 直接处理单张图像中的所有人（非视频流模式）
     /// 注意：请勿与 ProcessVideoFrame 混用
     /// </summary>
-    public List<PersonDetection> DetectPersons(Image<Rgb24> image, DetectionFlags flags)
+    public List<PersonDetection> DetectPersons(Image<Rgb24> image)
     {
         var detections = _yolo.DetectPersons(image);
         var results = new List<PersonDetection>();
@@ -127,14 +126,5 @@ public sealed class DetectService
         }
 
         return results;
-    }
-
-    /// <summary>
-    /// 重置跟踪器和帧缓存（新视频流开始前调用）
-    /// </summary>
-    public void Reset()
-    {
-        _tracker.Reset();
-        _trackFrames.Clear();
     }
 }

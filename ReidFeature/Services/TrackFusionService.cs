@@ -39,7 +39,8 @@ public sealed class TrackFusionService
     /// <returns>质量加权融合后的四维特征包</returns>
     public TrackFeaturePack FuseTrack(
         int trackId,
-        List<(Image<Rgb24> Frame, Rectangle Bbox, float Score)> frames)
+        List<(Image<Rgb24> Frame, Rectangle Bbox, float Score)> frames,
+        PointF[]? centers = null)
     {
         var sw = Stopwatch.StartNew();
 
@@ -86,7 +87,8 @@ public sealed class TrackFusionService
             headFeatures[i] = _reid.ExtractFeatures(frame, boundingBox, CropType.HeadShoulder);
 
             // 姿态 → 体型标量
-            using var crop = frame.Clone(ctx => ctx.Crop(bbox));
+            var safeBbox = ClampToBounds(bbox, frame.Width, frame.Height);
+            using var crop = frame.Clone(ctx => ctx.Crop(safeBbox));
             var keypoints = _pose.EstimatePose(crop);
             bodySignals[i] = _pose.CalculateBodySignals(keypoints);
         });
@@ -108,7 +110,9 @@ public sealed class TrackFusionService
         }
 
         // 步态标量：从 ByteTrack 轨迹中心点计算
-        var centers = _tracker.GetTrackCenters(trackId);
+        // 注意：调用方通常在 FlushCompletedTracks（已把 track 从字典移除）之后调用本方法，
+        // 此时 _tracker.GetTrackCenters 已取不到轨迹点，因此优先使用调用方传入的 centers。
+        centers ??= _tracker.GetTrackCenters(trackId);
         float[] fusedGait = ComputeGaitSignals(centers);
 
         Log.TrackFusionCompleted(_logger, trackId, frames.Count, sw.Elapsed.TotalMilliseconds);
@@ -154,13 +158,30 @@ public sealed class TrackFusionService
     }
 
     /// <summary>
+    /// 将 bbox 裁剪到图像边界内，避免检测框越界导致 Crop 抛异常
+    /// </summary>
+    private static Rectangle ClampToBounds(Rectangle rect, int imageWidth, int imageHeight)
+    {
+        if (imageWidth <= 0 || imageHeight <= 0)
+            return Rectangle.Empty;
+
+        int x = Math.Clamp(rect.X, 0, imageWidth - 1);
+        int y = Math.Clamp(rect.Y, 0, imageHeight - 1);
+        int right = Math.Clamp(rect.X + rect.Width, x + 1, imageWidth);
+        int bottom = Math.Clamp(rect.Y + rect.Height, y + 1, imageHeight);
+
+        return new Rectangle(x, y, right - x, bottom - y);
+    }
+
+    /// <summary>
     /// 从 ByteTrack 轨迹计算步态标量 [步频(Hz), 水平摆幅(px)]
     /// 步频 = 中心点垂直振荡的零交叉频率
     /// 摆幅 = 水平位置的标准差
     /// </summary>
     private static float[] ComputeGaitSignals(PointF[] centers)
     {
-        if (centers.Length < 10)
+        // 最少 3 个轨迹点：步频零交叉需要连续两个差分，摆幅需要标准差
+        if (centers.Length < 3)
             return [0f, 0f];
 
         // 步频：Y 方向零交叉法

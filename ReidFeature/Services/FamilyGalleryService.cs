@@ -15,8 +15,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
 {
     private readonly ILogger<FamilyGalleryService> _logger;
     private readonly YoloDetector _yolo;
-    private readonly ByteTrackTracker _tracker;
-    private readonly TrackFusionService _fusion;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly string _galleryDir;
 
     private readonly Dictionary<string, List<GalleryEntry>> _groups = [];
@@ -28,13 +27,11 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
     public FamilyGalleryService(
         ILogger<FamilyGalleryService> logger,
         YoloDetector yolo,
-        ByteTrackTracker tracker,
-        TrackFusionService fusion)
+        IServiceScopeFactory scopeFactory)
     {
         _logger = logger;
         _yolo = yolo;
-        _tracker = tracker;
-        _fusion = fusion;
+        _scopeFactory = scopeFactory;
         _galleryDir = Path.Combine(AppContext.BaseDirectory, "datas", "gallery") ?? 
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "datas", "gallery");
 
@@ -190,7 +187,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
             try
             {
                 var json = File.ReadAllText(file);
-                var data = JsonSerializer.Deserialize<GalleryData>(json);
+                var data = JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.GalleryData);
                 if (data?.Members is { Count: > 0 })
                 {
                     var groupId = Path.GetFileNameWithoutExtension(file);
@@ -209,7 +206,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
         foreach (var (groupId, members) in _groups)
         {
             var data = new GalleryData { Members = members };
-            var json = JsonSerializer.Serialize(data);
+            var json = JsonSerializer.Serialize(data, AppJsonSerializerContext.Default.GalleryData);
             var filePath = Path.Combine(_galleryDir, $"{groupId}.json");
             await File.WriteAllTextAsync(filePath, json, ct);
         }
@@ -255,7 +252,10 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
                 var frames = new List<(Image<Rgb24> Frame, Rectangle Bbox, float Score)>();
                 int frameIndex = 0;
 
-                _tracker.Reset();
+                using var scope = _scopeFactory.CreateScope();
+                var tracker = scope.ServiceProvider.GetRequiredService<ByteTrackTracker>();
+                tracker.Reset();
+
                 await foreach (var image in VideoDecoder.DecodeFramesAsync(fs, codec, _logger, 0, CancellationToken.None))
                 {
                     var detections = _yolo.DetectPersons(image);
@@ -266,7 +266,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
                     }
 
                     var input = detections.Select(d => (d.Bbox, d.Confidence)).ToList();
-                    var tracked = _tracker.Update(input, frameIndex++);
+                    var tracked = tracker.Update(input, frameIndex++);
 
                     // 缓存属于同一个主导 Track 的帧
                     if (tracked.Count > 0)
@@ -283,16 +283,15 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
                 }
 
                 // 取完成 Track 进行融合注册
-                var completed = _tracker.FlushCompletedTracks(minFrames: 5);
+                var completed = tracker.FlushCompletedTracks();
                 if (completed.Count > 0)
                 {
                     var best = completed[0];
-                    var trackFrames = frames.Where(f => frames.IndexOf(f) >= 0).ToList(); // simplified
-                    // Actually we need to map frames to tracks, simplified to use all frames
 
                     if (frames.Count > 3)
                     {
-                        var pack = _fusion.FuseTrack(best.TrackId, frames);
+                        var fusion = scope.ServiceProvider.GetRequiredService<TrackFusionService>();
+                        var pack = fusion.FuseTrack(best.TrackId, frames, best.Centers);
                         var groupId = "default";
                         await EnrollAsync(groupId, memberName, pack, CancellationToken.None);
                     }

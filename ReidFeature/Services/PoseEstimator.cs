@@ -19,6 +19,7 @@ public sealed class PoseEstimator : IDisposable
 {
     private readonly ILogger<PoseEstimator> _logger;
     private readonly InferenceSession _session;
+    private readonly string _inputName;
 
     private const int InputSize = 192;
     private const int NumKeypoints = 17;
@@ -45,6 +46,9 @@ public sealed class PoseEstimator : IDisposable
         }
 
         _session = new InferenceSession(modelPath, onnxOptions.Value.Pose);
+
+        // 从模型元数据动态获取输入名，避免硬编码（不同来源的 MoveNet ONNX 输入名可能不同）
+        _inputName = _session.InputMetadata.Keys.First();
     }
 
     /// <summary>
@@ -58,10 +62,10 @@ public sealed class PoseEstimator : IDisposable
 
         // 1. Resize 到 192×192
         using var resized = crop.Clone(ctx => ctx.Resize(InputSize, InputSize, KnownResamplers.Bicubic));
-        float scaleX = crop.Width / (float)InputSize;
-        float scaleY = crop.Height / (float)InputSize;
 
-        // 2. 构建 NHWC tensor (1×192×192×3)，像素值 [0, 1]
+        // 2. 构建 NHWC tensor (1×192×192×3)
+        //    注意：PINTO 导出的 MoveNet ONNX 内嵌归一化公式为 data * 1.0，
+        //    即期望原始 0-255 像素值输入（官方 demo 亦不除以 255），勿再归一化。
         int bufferSize = InputSize * InputSize * 3;
         float[] pixelData = ArrayPool<float>.Shared.Rent(bufferSize);
         try
@@ -74,9 +78,9 @@ public sealed class PoseEstimator : IDisposable
                     for (int x = 0; x < InputSize; x++)
                     {
                         int idx = y * InputSize + x;
-                        pixelData[idx * 3] = row[x].R / 255f;
-                        pixelData[idx * 3 + 1] = row[x].G / 255f;
-                        pixelData[idx * 3 + 2] = row[x].B / 255f;
+                        pixelData[idx * 3] = row[x].R;
+                        pixelData[idx * 3 + 1] = row[x].G;
+                        pixelData[idx * 3 + 2] = row[x].B;
                     }
                 }
             });
@@ -86,7 +90,7 @@ public sealed class PoseEstimator : IDisposable
                 [1, InputSize, InputSize, 3]);
 
             // 3. ONNX 推理
-            using var results = _session.Run([NamedOnnxValue.CreateFromTensor("input", inputTensor)]);
+            using var results = _session.Run([NamedOnnxValue.CreateFromTensor(_inputName, inputTensor)]);
 
             // 4. 解析输出
             var outputTensor = (DenseTensor<float>)results[0].AsTensor<float>();
@@ -122,10 +126,10 @@ public sealed class PoseEstimator : IDisposable
                 float xNorm = outputSpan[baseIdx + 1];
                 float conf = outputSpan[baseIdx + 2];
 
-                // 映射回原裁剪图像素空间
+                // MoveNet 输出为 [0,1] 归一化坐标，乘以裁剪图尺寸映射回像素空间
                 keypoints[i] = (
-                    yNorm * scaleY,
-                    xNorm * scaleX,
+                    yNorm * crop.Height,
+                    xNorm * crop.Width,
                     conf
                 );
             }

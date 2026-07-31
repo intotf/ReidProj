@@ -13,24 +13,51 @@ namespace ReidFeature.Handlers;
 public static class EnrollmentHandler
 {
     /// <summary>
-    /// 处理注册请求
+    /// 处理 H264 视频流注册
     /// </summary>
-    /// <param name="familyProvider">家庭成员提供者</param>
-    /// <param name="context">HTTP 上下文</param>
-    /// <param name="detectService">检测服务</param>
-    /// <param name="logger">日志记录器</param>
-    /// <param name="groupId">分组 ID</param>
-    /// <param name="memberName">成员名称</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>HTTP 响应（200 + memberId，或 400）</returns>
-    public static async Task<IResult> HandleEnrollAsync(
+    public static async Task<IResult> HandleH264EnrollAsync(
         IFamilyMemberProvider familyProvider,
         HttpContext context,
         DetectService detectService,
         ILogger<Program> logger,
         string groupId,
         string memberName,
+        int frameIntervalSeconds = 0,
         CancellationToken cancellationToken = default)
+    {
+        return await EnrollVideoAsync(
+            familyProvider, context, detectService, logger,
+            groupId, memberName, VideoCodec.H264, frameIntervalSeconds, cancellationToken);
+    }
+
+    /// <summary>
+    /// 处理 H265 视频流注册
+    /// </summary>
+    public static async Task<IResult> HandleH265EnrollAsync(
+        IFamilyMemberProvider familyProvider,
+        HttpContext context,
+        DetectService detectService,
+        ILogger<Program> logger,
+        string groupId,
+        string memberName,
+        int frameIntervalSeconds = 0,
+        CancellationToken cancellationToken = default)
+    {
+        return await EnrollVideoAsync(
+            familyProvider, context, detectService, logger,
+            groupId, memberName, VideoCodec.H265, frameIntervalSeconds, cancellationToken);
+    }
+
+    private static async Task<IResult> EnrollVideoAsync(
+        IFamilyMemberProvider familyProvider,
+        HttpContext context,
+        DetectService detectService,
+        ILogger<Program> logger,
+        string groupId,
+        string memberName,
+        VideoCodec codec,
+        int frameIntervalSeconds,
+        CancellationToken cancellationToken)
     {
         var request = context.Request;
 
@@ -45,20 +72,11 @@ public static class EnrollmentHandler
             return Results.BadRequest("memberName 不能为空");
         }
 
-        // 从 Content-Type 推断编码，默认 H264
-        var contentType = request.ContentType?.ToLowerInvariant() ?? "";
-        var codec = contentType switch
-        {
-            string c when c.Contains("h265") || c.Contains("hevc") => VideoCodec.H265,
-            _ => VideoCodec.H264,
-        };
-
         // 处理视频流
-        detectService.Reset();
         int frameIdx = 0;
 
         var enumerable = VideoDecoder.DecodeFramesAsync(
-            request.Body, codec, logger, frameIntervalSeconds: 0, cancellationToken);
+            request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
         await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
 
         while (true)
@@ -84,7 +102,7 @@ public static class EnrollmentHandler
         }
 
         // 获取完成的 Track（取主导 Track）
-        var tracks = detectService.FlushCompletedTracks(minFrames: 5);
+        var tracks = detectService.FlushCompletedTracks();
         if (tracks.Count == 0)
         {
             return Results.BadRequest("未检测到有效人物，请确保视频中包含清晰的人物");

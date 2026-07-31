@@ -36,12 +36,12 @@ namespace ReidFeature
             builder.Services.AddSingleton<YoloDetector>();
             builder.Services.AddSingleton<ReIdExtractor>();
             builder.Services.AddSingleton<PoseEstimator>();
-            builder.Services.AddSingleton<ByteTrackTracker>();
-            builder.Services.AddSingleton<TrackFusionService>();
+            builder.Services.AddScoped<ByteTrackTracker>();
+            builder.Services.AddScoped<TrackFusionService>();
             builder.Services.AddSingleton<FamilyGalleryService>();
             builder.Services.AddSingleton<IFamilyMemberProvider>(sp =>
                 sp.GetRequiredService<FamilyGalleryService>());
-            builder.Services.AddSingleton<DetectService>();
+            builder.Services.AddScoped<DetectService>();
 
             builder.Services.AddOpenApi();
 
@@ -77,8 +77,12 @@ namespace ReidFeature
                .Accepts<byte[]>("application/octet-stream");
 
             // ── 家庭成员管理端点 ─────────────────────────
-            app.MapPost("/family/enroll/{groupId}/{memberName}", EnrollmentHandler.HandleEnrollAsync)
-               .WithName("FamilyEnroll")
+            app.MapPost("/family/enroll/h264/{groupId}/{memberName}", EnrollmentHandler.HandleH264EnrollAsync)
+               .WithName("FamilyEnrollH264")
+               .Accepts<byte[]>("application/octet-stream");
+
+            app.MapPost("/family/enroll/h265/{groupId}/{memberName}", EnrollmentHandler.HandleH265EnrollAsync)
+               .WithName("FamilyEnrollH265")
                .Accepts<byte[]>("application/octet-stream");
 
             app.MapDelete("/family/{groupId}/{memberId}", async (

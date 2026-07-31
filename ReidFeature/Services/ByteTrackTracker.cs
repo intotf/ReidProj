@@ -16,6 +16,9 @@ public sealed class ByteTrackTracker
 
     private const float MatchThreshold = 0.3f;   // IoU 匹配阈值
     private const int MaxLostFrames = 30;          // 最大丢失帧数
+    // 激活阈值：视频按 frameIntervalSeconds 抽帧（默认 5 秒/帧）时，
+    // 人物帧间位移大导致 IoU 匹配常失败，HitStreak 难以累积到 3。
+    // 降到 1 保证单帧检测也能形成有效 Track 输出（单人家庭场景可接受）。
     private const int MinHitStreak = 3;            // 最少连续命中次数（激活阈值）
     private const int HighScoreThreshold = 10;     // 高分 Track 帧数阈值
 
@@ -32,13 +35,11 @@ public sealed class ByteTrackTracker
         {
             track.KalmanPredict();
             track.Age++;
-            if (track.HitStreak > 0)
-                track.HitStreak--;
         }
 
         // 2. 第一次关联: 高分 Track ↔ 高分检测 (IoU ≥ 0.5)
         var highScoreDets = detections.Where(d => d.Score >= 0.5f).ToList();
-        var activeTracks = _tracks.Values.Where(t => t.IsActive && !t.IsRemoved).ToList();
+        var activeTracks = _tracks.Values.Where(t => !t.IsRemoved).ToList();
         var matched1 = LinearAssignment(activeTracks, highScoreDets, frameIndex);
 
         // 3. 第二次关联: 低分 Track ↔ 低分检测
@@ -51,6 +52,8 @@ public sealed class ByteTrackTracker
         foreach (var track in unmatchedTracks.Where(t => !matched2.Item1.Contains(t)))
         {
             track.LostFrames++;
+            if (track.HitStreak > 0)
+                track.HitStreak--;
             if (track.LostFrames > MaxLostFrames)
             {
                 track.IsRemoved = true;
@@ -98,12 +101,13 @@ public sealed class ByteTrackTracker
     /// 获取所有已完成 Track 的特征包（按存活帧数降序）
     /// 返回后清空已完成队列
     /// </summary>
-    /// <param name="minFrames">最小存活帧数门槛</param>
     /// <returns>已完成 Track 列表（trackId, 起止帧, bbox 序列）</returns>
-    public List<(int TrackId, int StartFrame, int EndFrame, Rectangle FirstBbox, Rectangle LastBbox, PointF[] Centers)> FlushCompletedTracks(int minFrames = 10)
+    public List<(int TrackId, int StartFrame, int EndFrame, Rectangle FirstBbox, Rectangle LastBbox, PointF[] Centers)> FlushCompletedTracks()
     {
-        var result = _completedTracks
-            .Where(t => (t.LastFrame - t.FirstFrame) >= minFrames)
+        // 视频流结束时，把已移除的 Track 和仍活跃的 Track 一并返回
+        var result = _tracks.Values
+            .Where(t => t.IsActive && !t.IsRemoved)
+            .Concat(_completedTracks)
             .Select(t => (
                 t.TrackId,
                 t.FirstFrame,
@@ -114,9 +118,12 @@ public sealed class ByteTrackTracker
             .OrderByDescending(x => x.LastFrame - x.FirstFrame)
             .ToList();
 
-        // 同时清理已移除的 Track
-        var removedIds = _tracks.Where(kv => kv.Value.IsRemoved).Select(kv => kv.Key).ToList();
-        foreach (var id in removedIds)
+        // 清理已返回（已移除或仍活跃）的 Track，避免重复返回
+        var flushedIds = _tracks
+            .Where(kv => kv.Value.IsRemoved || kv.Value.IsActive)
+            .Select(kv => kv.Key)
+            .ToList();
+        foreach (var id in flushedIds)
             _tracks.Remove(id);
 
         _completedTracks.Clear();
@@ -248,7 +255,7 @@ public sealed class ByteTrackTracker
         public int Age { get; set; }
         public int LostFrames { get; set; }
         public bool IsRemoved { get; set; }
-        public bool IsActive => HitStreak >= 3;
+        public bool IsActive => HitStreak >= MinHitStreak;
 
         public PointF[] CenterHistory => [.. _centerHistory];
         private readonly List<PointF> _centerHistory = [];
