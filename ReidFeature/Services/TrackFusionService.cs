@@ -3,6 +3,7 @@ using ReidFeature.Payloads;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using System.Buffers;
 using System.Diagnostics;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
@@ -47,143 +48,208 @@ public sealed class TrackFusionService
     /// <param name="frames">该 Track 内所有帧的 (原图, bbox, 检测置信度)</param>
     /// <param name="centers">轨迹中心点序列（可选，用于步态特征）</param>
     /// <returns>质量加权融合后的四维特征包</returns>
+    /// <remarks>frames 中的 bbox 必须与 Frame 图像同坐标系（Frame 为 bbox 裁剪图时，bbox 应为裁剪图局部坐标，左上角为原点）</remarks>
     public TrackFeaturePack FuseTrack(
         int trackId,
-        List<(Image<Rgb24> Frame, Rectangle Bbox, float Score)> frames,
-        PointF[]? centers = null)
+        ReadOnlySpan<(Image<Rgb24> Frame, Rectangle Bbox, float Score)> frames,
+        ReadOnlySpan<PointF> centers = default)
     {
         var sw = Stopwatch.StartNew();
 
-        if (frames.Count == 0)
+        int frameCount = frames.Length;
+        if (frameCount == 0)
+        {
             return new TrackFeaturePack();
+        }
 
-        // 计算每帧的质量权重 = bbox 面积 × 检测置信度
-        float maxArea = frames.Max(f => (float)f.Bbox.Width * f.Bbox.Height);
-        var weights = new float[frames.Count];
-        float totalWeight = 0f;
-        for (int i = 0; i < frames.Count; i++)
+        // 计算每帧的质量权重 = bbox 面积 × 检测置信度（线性扫描，无需 LINQ）
+        float maxArea = 0f;
+        for (int i = 0; i < frameCount; i++)
         {
             float area = frames[i].Bbox.Width * frames[i].Bbox.Height;
-            weights[i] = (area / maxArea) * frames[i].Score;
-            totalWeight += weights[i];
-        }
-        if (totalWeight <= 0f) totalWeight = 1f;
-
-        // 取 K 个最高权重帧做特征提取（避免全帧计算，降低延迟）
-        int topK = Math.Min(5, frames.Count);
-        var topIndices = Enumerable.Range(0, frames.Count)
-            .OrderByDescending(i => weights[i])
-            .Take(topK)
-            .ToList();
-
-        // 全身 ReID 特征（cloth）
-        byte[][] clothFeatures = new byte[topK][];
-        // 头肩 ReID 特征（head）
-        byte[][] headFeatures = new byte[topK][];
-        // 体型标量
-        float[][] bodySignals = new float[topK][];
-
-        // 对 Top-K 帧并行提取
-        Parallel.For(0, topK, i =>
-        {
-            int idx = topIndices[i];
-            var (frame, bbox, _) = frames[idx];
-            var boundingBox = new BoundingBox(bbox.X, bbox.Y, bbox.Width, bbox.Height);
-
-            // 全身 ReID
-            clothFeatures[i] = _reid.ExtractFeatures(frame, boundingBox, CropType.FullBody);
-
-            // 头肩 ReID
-            headFeatures[i] = _reid.ExtractFeatures(frame, boundingBox, CropType.HeadShoulder);
-
-            // 姿态 → 体型标量
-            var safeBbox = ClampToBounds(bbox, frame.Width, frame.Height);
-            using var crop = frame.Clone(ctx => ctx.Crop(safeBbox));
-            var keypoints = _pose.EstimatePose(crop);
-            bodySignals[i] = _pose.CalculateBodySignals(keypoints);
-        });
-
-        // 按权重融合特征向量（加权逐元素平均 + L2 归一化）
-        // Top-K ≤ 5，栈上分配权重数组，避免为每个特征重复 ToArray
-        Span<float> topWeights = stackalloc float[topK];
-        for (int i = 0; i < topK; i++)
-            topWeights[i] = weights[topIndices[i]];
-
-        byte[] fusedCloth = WeightedAverageFeatures(clothFeatures, topWeights, totalWeight);
-        byte[] fusedHead = WeightedAverageFeatures(headFeatures, topWeights, totalWeight);
-
-        // 体型标量：加权平均
-        float[] fusedBody = new float[2];
-        for (int i = 0; i < topK; i++)
-        {
-            float w = topWeights[i] / totalWeight;
-            if (bodySignals[i].Length >= 2)
+            if (area > maxArea)
             {
-                fusedBody[0] += bodySignals[i][0] * w;
-                fusedBody[1] += bodySignals[i][1] * w;
+                maxArea = area;
             }
         }
-
-        // 步态标量：从 ByteTrack 轨迹中心点计算
-        // 注意：调用方通常在 FlushCompletedTracks（已把 track 从字典移除）之后调用本方法，
-        // 此时 _tracker.GetTrackCenters 已取不到轨迹点，因此优先使用调用方传入的 centers。
-        centers ??= _tracker.GetTrackCenters(trackId);
-        float[] fusedGait = ComputeGaitSignals(centers);
-
-        Log.TrackFusionCompleted(_logger, trackId, frames.Count, sw.Elapsed.TotalMilliseconds);
-
-        return new TrackFeaturePack
+        // 防御：无有效面积（bbox 宽高为 0）时无法计算权重，直接返回空包
+        if (maxArea <= 0f)
         {
-            VecCloth = fusedCloth,
-            VecHead = fusedHead,
-            BodySignals = fusedBody,
-            GaitSignals = fusedGait,
-        };
+            return new TrackFeaturePack();
+        }
+
+        float[] weightsBuffer = ArrayPool<float>.Shared.Rent(frameCount);
+        try
+        {
+            // ArrayPool 返回的数组实际长度 ≥ 请求值，用 Span 限定有效范围
+            Span<float> weightsSpan = weightsBuffer.AsSpan(0, frameCount);
+
+            float totalWeight = 0f;
+            for (int i = 0; i < weightsSpan.Length; i++)
+            {
+                float area = frames[i].Bbox.Width * frames[i].Bbox.Height;
+                weightsSpan[i] = (area / maxArea) * frames[i].Score;
+                totalWeight += weightsSpan[i];
+            }
+            if (totalWeight <= 0f)
+            {
+                totalWeight = 1f;
+            }
+
+            // 取 K 个最高权重帧做特征提取（避免全帧计算，降低延迟）
+            // topK ≤ 5：Top-Frames 为小堆数组（供并行闭包捕获），权重栈上分配
+            int topK = Math.Min(5, frameCount);
+            var topFrames = new (Image<Rgb24> Frame, Rectangle Bbox, float Score)[topK];
+            Span<float> topWeights = stackalloc float[topK];
+            SelectTopFrames(frames, weightsSpan, topFrames, topWeights);
+
+            // 全身 ReID 特征（cloth）
+            byte[][] clothFeatures = new byte[topK][];
+            // 头肩 ReID 特征（head）
+            byte[][] headFeatures = new byte[topK][];
+            // 体型标量
+            var bodySignals = new (float HeadBody, float ShoulderHip)[topK];
+
+            // 对 Top-K 帧并行提取
+            Parallel.For(0, topK, i =>
+            {
+                var (frame, bbox, _) = topFrames[i];
+                var boundingBox = new BoundingBox(bbox.X, bbox.Y, bbox.Width, bbox.Height);
+
+                // 全身 ReID
+                clothFeatures[i] = _reid.ExtractFeatures(frame, boundingBox, CropType.FullBody);
+
+                // 头肩 ReID
+                headFeatures[i] = _reid.ExtractFeatures(frame, boundingBox, CropType.HeadShoulder);
+
+                // 姿态 → 体型标量
+                var safeBbox = BoundingBoxHelper.ClampToBounds(bbox, frame.Width, frame.Height);
+                using var crop = frame.Clone(ctx => ctx.Crop(safeBbox));
+                var keypoints = _pose.EstimatePose(crop);
+                bodySignals[i] = _pose.CalculateBodySignals(keypoints);
+            });
+
+            // 按权重融合特征向量（加权逐元素平均 + L2 归一化）
+            byte[] fusedCloth = WeightedAverageFeatures(clothFeatures, topWeights, totalWeight);
+            byte[] fusedHead = WeightedAverageFeatures(headFeatures, topWeights, totalWeight);
+
+            // 体型标量：加权平均
+            float[] fusedBody = new float[2];
+            for (int i = 0; i < topK; i++)
+            {
+                float w = topWeights[i] / totalWeight;
+                fusedBody[0] += bodySignals[i].HeadBody * w;
+                fusedBody[1] += bodySignals[i].ShoulderHip * w;
+            }
+
+            // 步态标量：从 ByteTrack 轨迹中心点计算
+            // 注意：调用方通常在 FlushCompletedTracks（已把 track 从字典移除）之后调用本方法，
+            // 此时 _tracker.GetTrackCenters 已取不到轨迹点，因此优先使用调用方传入的 centers。
+            if (centers.IsEmpty)
+            {
+                centers = _tracker.GetTrackCenters(trackId);
+            }
+            (float stepFrequency, float swingAmplitude) = ComputeGaitSignals(centers);
+
+            Log.TrackFusionCompleted(_logger, trackId, frameCount, sw.Elapsed.TotalMilliseconds);
+
+            return new TrackFeaturePack
+            {
+                VecCloth = fusedCloth,
+                VecHead = fusedHead,
+                BodySignals = fusedBody,
+                GaitSignals = [stepFrequency, swingAmplitude],
+            };
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(weightsBuffer);
+        }
+    }
+
+    /// <summary>
+    /// 从权重数组中选取 Top-K 帧（O(n·K) 插入式维护，替代 LINQ 排序分配）
+    /// </summary>
+    private static void SelectTopFrames(
+        ReadOnlySpan<(Image<Rgb24> Frame, Rectangle Bbox, float Score)> frames,
+        ReadOnlySpan<float> weights,
+        Span<(Image<Rgb24> Frame, Rectangle Bbox, float Score)> topFrames,
+        Span<float> topWeights)
+    {
+        int filled = 0;
+        for (int i = 0; i < frames.Length; i++)
+        {
+            float w = weights[i];
+            if (filled < topFrames.Length)
+            {
+                topFrames[filled] = frames[i];
+                topWeights[filled] = w;
+                filled++;
+                // 冒泡保持按权重降序
+                for (int j = filled - 1; j > 0 && topWeights[j] > topWeights[j - 1]; j--)
+                {
+                    (topFrames[j], topFrames[j - 1]) = (topFrames[j - 1], topFrames[j]);
+                    (topWeights[j], topWeights[j - 1]) = (topWeights[j - 1], topWeights[j]);
+                }
+            }
+            else if (w > topWeights[topFrames.Length - 1])
+            {
+                topFrames[topFrames.Length - 1] = frames[i];
+                topWeights[topFrames.Length - 1] = w;
+                for (int j = topFrames.Length - 1; j > 0 && topWeights[j] > topWeights[j - 1]; j--)
+                {
+                    (topFrames[j], topFrames[j - 1]) = (topFrames[j - 1], topFrames[j]);
+                    (topWeights[j], topWeights[j - 1]) = (topWeights[j - 1], topWeights[j]);
+                }
+            }
+        }
     }
 
     /// <summary>
     /// 加权融合特征向量 — 逐元素加权平均后 L2 归一化
+    /// 累加缓冲从 ArrayPool 租借，MultiplyAdd 单趟 SIMD 融合
     /// </summary>
     private static byte[] WeightedAverageFeatures(ReadOnlySpan<byte[]> features, ReadOnlySpan<float> weights, float totalWeight)
     {
         if (features.Length == 0 || features[0].Length == 0)
-            return [];
-
-        int dim = features[0].Length;
-        var avg = new float[dim / 4];
-        var scaled = new float[avg.Length];
-
-        for (int i = 0; i < features.Length; i++)
         {
-            if (features[i] == null || features[i].Length != dim) continue;
-            float w = weights[i] / totalWeight;
-            var vec = MemoryMarshal.Cast<byte, float>(features[i]);
-            TensorPrimitives.Multiply(vec, w, scaled);
-            TensorPrimitives.Add(avg, scaled, avg);
+            return [];
         }
 
-        // L2 归一化
-        float norm = TensorPrimitives.Norm(avg);
-        if (norm > 1e-8f)
-            TensorPrimitives.Divide(avg, norm, avg);
+        int dim = features[0].Length;
+        int floatDim = dim / 4;
+        float[] poolBuffer = ArrayPool<float>.Shared.Rent(floatDim);
+        try
+        {
+            Span<float> avg = poolBuffer.AsSpan(0, floatDim);
+            // ArrayPool 残留脏数据，必须先清零（MultiplyAdd 是累加语义）
+            avg.Clear();
 
-        return MemoryMarshal.Cast<float, byte>(avg).ToArray();
-    }
+            for (int i = 0; i < features.Length; i++)
+            {
+                if (features[i] == null || features[i].Length != dim)
+                {
+                    continue;
+                }
+                float w = weights[i] / totalWeight;
+                var vec = MemoryMarshal.Cast<byte, float>(features[i]);
+                // 单趟融合: avg = avg + vec * w（destination 与 addend 重叠）
+                TensorPrimitives.MultiplyAdd(vec, w, avg, avg);
+            }
 
-    /// <summary>
-    /// 将 bbox 裁剪到图像边界内，避免检测框越界导致 Crop 抛异常
-    /// </summary>
-    private static Rectangle ClampToBounds(Rectangle rect, int imageWidth, int imageHeight)
-    {
-        if (imageWidth <= 0 || imageHeight <= 0)
-            return Rectangle.Empty;
+            // L2 归一化
+            float norm = TensorPrimitives.Norm(avg);
+            if (norm > 1e-8f)
+            {
+                TensorPrimitives.Divide(avg, norm, avg);
+            }
 
-        int x = Math.Clamp(rect.X, 0, imageWidth - 1);
-        int y = Math.Clamp(rect.Y, 0, imageHeight - 1);
-        int right = Math.Clamp(rect.X + rect.Width, x + 1, imageWidth);
-        int bottom = Math.Clamp(rect.Y + rect.Height, y + 1, imageHeight);
-
-        return new Rectangle(x, y, right - x, bottom - y);
+            return MemoryMarshal.Cast<float, byte>(avg).ToArray();
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(poolBuffer);
+        }
     }
 
     /// <summary>
@@ -191,11 +257,13 @@ public sealed class TrackFusionService
     /// 步频 = 中心点垂直振荡的零交叉频率
     /// 摆幅 = 水平位置的标准差
     /// </summary>
-    private static float[] ComputeGaitSignals(ReadOnlySpan<PointF> centers)
+    private static (float StepFrequency, float SwingAmplitude) ComputeGaitSignals(ReadOnlySpan<PointF> centers)
     {
         // 最少 3 个轨迹点：步频零交叉需要连续两个差分，摆幅需要标准差
         if (centers.Length < 3)
-            return [0f, 0f];
+        {
+            return (0f, 0f);
+        }
 
         // 步频：Y 方向零交叉法
         int zeroCrossings = 0;
@@ -206,7 +274,9 @@ public sealed class TrackFusionService
             {
                 float prevDy = centers[i - 1].Y - centers[i - 2].Y;
                 if (prevDy > 0 && dy <= 0)
+                {
                     zeroCrossings++;
+                }
             }
         }
         float stepFrequency = zeroCrossings / 2f;
@@ -216,7 +286,6 @@ public sealed class TrackFusionService
         for (int i = 0; i < centers.Length; i++)
             meanX += centers[i].X;
         meanX /= centers.Length;
-         
 
         float varianceX = 0f;
         for (int i = 0; i < centers.Length; i++)
@@ -224,6 +293,6 @@ public sealed class TrackFusionService
         varianceX /= centers.Length;
         float swingAmplitude = MathF.Sqrt(varianceX);
 
-        return [stepFrequency, swingAmplitude];
+        return (stepFrequency, swingAmplitude);
     }
 }

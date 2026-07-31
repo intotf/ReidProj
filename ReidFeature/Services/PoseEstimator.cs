@@ -164,8 +164,9 @@ public sealed class PoseEstimator : IDisposable
     /// 从关键点计算体型标量（换衣不变的生物特征）
     /// </summary>
     /// <param name="keypoints">17 个关键点（ReadOnlySpan）</param>
-    /// <returns>float[2] = [头身比, 肩髋比]</returns>
-    public float[] CalculateBodySignals(ReadOnlySpan<(float Y, float X, float Confidence)> keypoints)
+    /// <returns>(头身比, 肩髋比) 元组</returns>
+    public (float HeadBodyRatio, float ShoulderHipRatio) CalculateBodySignals(
+        ReadOnlySpan<(float Y, float X, float Confidence)> keypoints)
     {
         // 仅使用置信度 > 0.3 的关键点
         float noseY = keypoints[Nose].Confidence > 0.3f ? keypoints[Nose].Y : float.NaN;
@@ -187,7 +188,9 @@ public sealed class PoseEstimator : IDisposable
             float noseToHip = Math.Abs(noseY - hipMidY);
             float shoulderToHip = Math.Abs(shoulderMidY - hipMidY);
             if (shoulderToHip > 1f)
+            {
                 headBodyRatio = noseToHip / shoulderToHip;
+            }
         }
 
         // 肩髋比 = 肩宽 / 髋宽
@@ -197,10 +200,12 @@ public sealed class PoseEstimator : IDisposable
             float shoulderWidth = Math.Abs(lsX - rsX);
             float hipWidth = Math.Abs(lhX - rhX);
             if (hipWidth > 1f)
+            {
                 shoulderHipRatio = shoulderWidth / hipWidth;
+            }
         }
 
-        return [headBodyRatio, shoulderHipRatio];
+        return (headBodyRatio, shoulderHipRatio);
     }
 
     /// <summary>

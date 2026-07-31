@@ -16,9 +16,8 @@ public sealed class ByteTrackTracker
     private const int MaxLostFrames = 30;          // 最大丢失帧数
     // 激活阈值：视频按 frameIntervalSeconds 抽帧（默认 5 秒/帧）时，
     // 人物帧间位移大导致 IoU 匹配常失败，HitStreak 难以累积到 3。
-    // 降到 1 保证单帧检测也能形成有效 Track 输出（单人家庭场景可接受）。
+    // 保持 3：人物至少连续命中 3 帧才形成有效 Track，过滤单帧误检（单人家庭场景可接受）。
     private const int MinHitStreak = 3;            // 最少连续命中次数（激活阈值）
-    private const int HighScoreThreshold = 10;     // 高分 Track 帧数阈值
 
     /// <summary>
     /// 使用当前帧检测结果更新跟踪器
@@ -35,27 +34,41 @@ public sealed class ByteTrackTracker
         }
 
         // 2. 第一次关联: 高分 Track ↔ 高分检测 (IoU ≥ 0.5)
-        var highScoreDets = detections.Where(d => d.Score >= 0.5f).ToList();
+        //    所有检测统一携带 detections 中的原始索引，确保匹配结果索引与 detections 对齐
+        var highScoreDets = new List<(int Idx, Rectangle Bbox, float Score)>();
+        for (int i = 0; i < detections.Count; i++)
+        {
+            if (detections[i].Score >= 0.5f)
+            {
+                highScoreDets.Add((i, detections[i].Bbox, detections[i].Score));
+            }
+        }
         var activeTracks = _tracks.Values.Where(t => !t.IsRemoved).ToList();
         var matched1 = LinearAssignment(activeTracks, highScoreDets);
 
-        // 3. 第二次关联: 低分 Track ↔ 低分检测
+        // 3. 第二次关联: 未匹配 Track ↔ 未匹配高分检测 + 低分检测
         var unmatchedTracks = activeTracks.Where(t => !matched1.MatchedTracks.Contains(t)).ToList();
-        var unmatchedDetections = highScoreDets.Where((d, i) => !matched1.MatchedDetIndices.Contains(i))
-            .Concat(detections.Where(d => d.Score < 0.5f)).ToList();
+        var unmatchedDetections = highScoreDets
+            .Where(t => !matched1.MatchedDetIndices.Contains(t.Idx))
+            .Concat(detections
+                .Select((d, i) => (Idx: i, d.Bbox, d.Score))
+                .Where(t => t.Score < 0.5f))
+            .ToList();
         var matched2 = IoUMatching(unmatchedTracks, unmatchedDetections, 0.5f);
 
         // 4. 处理未匹配的 Track → 标记为丢失
         foreach (var track in unmatchedTracks.Where(t => !matched2.MatchedTracks.Contains(t)))
         {
             track.LostFrames++;
-            if (track.HitStreak > 0)
-                track.HitStreak--;
+            // 与原版 ByteTrack 一致：HitStreak 只在命中时递增，丢失时不递减，
+            // 激活为一次性闩锁 —— 已激活 Track 在遮挡期仍保持激活，不会被剔除出融合结果
             if (track.LostFrames > MaxLostFrames)
             {
                 track.IsRemoved = true;
                 if (track.HitStreak >= MinHitStreak)
+                {
                     _completedTracks.Add(track);
+                }
             }
         }
 
@@ -64,7 +77,9 @@ public sealed class ByteTrackTracker
         for (int i = 0; i < detections.Count; i++)
         {
             if (allMatchedDets.Contains(i))
+            {
                 continue;
+            }
 
             var (bbox, score) = detections[i];
             var track = new Tracklet(_nextTrackId++, bbox, score);
@@ -129,13 +144,15 @@ public sealed class ByteTrackTracker
     /// 匈牙利算法线性分配 — 基于 IoU 代价矩阵
     /// </summary>
     private static (List<Tracklet> MatchedTracks, HashSet<int> MatchedDetIndices) LinearAssignment(
-        List<Tracklet> tracks, List<(Rectangle Bbox, float Score)> detections)
+        List<Tracklet> tracks, List<(int Idx, Rectangle Bbox, float Score)> detections)
     {
         var matchedTracks = new List<Tracklet>();
         var matchedDetIndices = new HashSet<int>();
 
         if (tracks.Count == 0 || detections.Count == 0)
+        {
             return (matchedTracks, matchedDetIndices);
+        }
 
         // 构建 IoU 代价矩阵
         int n = tracks.Count, m = detections.Count;
@@ -156,14 +173,16 @@ public sealed class ByteTrackTracker
         {
             int j = assignment[i];
             if (j < 0 || j >= m)
+            {
                 continue;
+            }
 
             float iou = 1f - costMatrix[i, j];
             if (iou >= MatchThreshold)
             {
                 tracks[i].Update(detections[j].Bbox, detections[j].Score);
                 matchedTracks.Add(tracks[i]);
-                matchedDetIndices.Add(j);
+                matchedDetIndices.Add(detections[j].Idx);
             }
         }
 
@@ -174,7 +193,7 @@ public sealed class ByteTrackTracker
     /// IoU 匹配（第二次关联用更高阈值）
     /// </summary>
     private static (List<Tracklet> MatchedTracks, HashSet<int> MatchedDetIndices) IoUMatching(
-        List<Tracklet> tracks, List<(Rectangle Bbox, float Score)> detections, float threshold)
+        List<Tracklet> tracks, List<(int Idx, Rectangle Bbox, float Score)> detections, float threshold)
     {
         var matchedTracks = new List<Tracklet>();
         var matchedDetIndices = new HashSet<int>();
@@ -187,7 +206,9 @@ public sealed class ByteTrackTracker
             for (int j = 0; j < detections.Count; j++)
             {
                 if (matchedDetIndices.Contains(j))
+                {
                     continue;
+                }
 
                 float iou = ComputeIoU(track.LastBbox, detections[j].Bbox);
                 if (iou > bestIoU)
@@ -201,7 +222,7 @@ public sealed class ByteTrackTracker
             {
                 track.Update(detections[bestIdx].Bbox, detections[bestIdx].Score);
                 matchedTracks.Add(track);
-                matchedDetIndices.Add(bestIdx);
+                matchedDetIndices.Add(detections[bestIdx].Idx);
             }
         }
 
@@ -216,7 +237,9 @@ public sealed class ByteTrackTracker
         int interBottom = Math.Min(a.Bottom, b.Bottom);
 
         if (interLeft >= interRight || interTop >= interBottom)
+        {
             return 0f;
+        }
 
         int interArea = (interRight - interLeft) * (interBottom - interTop);
         int areaA = a.Width * a.Height;
@@ -243,7 +266,6 @@ public sealed class ByteTrackTracker
         public int TrackId { get; }
         public Rectangle FirstBbox { get; }
         public Rectangle LastBbox { get; private set; }
-        public float MaxScore { get; private set; }
         public int HitStreak { get; set; }
         public int Age { get; set; }
         public int LostFrames { get; set; }
@@ -260,7 +282,6 @@ public sealed class ByteTrackTracker
             TrackId = id;
             FirstBbox = bbox;
             LastBbox = bbox;
-            MaxScore = score;
             HitStreak = 1;
             Age = 0;
             LostFrames = 0;
@@ -276,7 +297,6 @@ public sealed class ByteTrackTracker
             LastBbox = bbox;
             HitStreak++;
             LostFrames = 0;
-            if (score > MaxScore) MaxScore = score;
 
             float cx = bbox.X + bbox.Width / 2f;
             float cy = bbox.Y + bbox.Height / 2f;
@@ -501,7 +521,10 @@ public sealed class ByteTrackTracker
 
                 for (int k = 0; k < n; k++)
                 {
-                    if (k == i) continue;
+                    if (k == i)
+                    {
+                        continue;
+                    }
                     float factor = a[k, i];
                     for (int j = 0; j < n; j++)
                     {
@@ -539,13 +562,21 @@ internal static class HungarianSolver
             for (int j = 0; j < m; j++)
             {
                 a[i, j] = cost[i, j];
-                if (cost[i, j] > maxCost) maxCost = cost[i, j];
+                if (cost[i, j] > maxCost)
+                {
+                    maxCost = cost[i, j];
+                }
             }
         // 填充扩展行/列为大值（最小化问题中避免匹配到虚拟行列）
         float big = maxCost + 1;
         for (int i = 0; i < size; i++)
             for (int j = 0; j < size; j++)
-                if (i >= n || j >= m) a[i, j] = big;
+            {
+                if (i >= n || j >= m)
+                {
+                    a[i, j] = big;
+                }
+            }
 
         // 标准 Hungarian 算法 (Munkres)
         var u = new float[size];

@@ -3,6 +3,7 @@ using ReidFeature.Payloads;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using System.Runtime.InteropServices;
 
 namespace ReidFeature.Services;
 
@@ -45,31 +46,85 @@ public sealed class DetectService
     /// 将当前帧的检测结果按 TrackId 缓存
     /// </summary>
     /// <param name="image">当前帧 RGB 图像</param>
-    /// <returns>跟踪结果列表 (trackId, bbox, 置信度)</returns>
-    public List<(int TrackId, Rectangle Bbox, float Score)> ProcessVideoFrame(Image<Rgb24> image)
+    private void ProcessVideoFrame(Image<Rgb24> image)
     {
         var detections = _yolo.DetectPersons(image);
+        // 无论是否有检测都让 tracker 推进：无人帧触发丢失逻辑（LostFrames++ / HitStreak--）
+        var tracked = _tracker.Update(detections);
         if (detections.Count == 0)
-            return [];
+        {
+            return;
+        }
 
-        var input = detections.Select(d => (d.Bbox, d.Confidence)).ToList();
-        var tracked = _tracker.Update(input);
+        // 每帧构建一次 bbox→置信度 映射，避免循环内 O(n²) 线性查找
+        var scoreByBbox = new Dictionary<Rectangle, float>(detections.Count);
+        for (int i = 0; i < detections.Count; i++)
+            scoreByBbox[detections[i].Bbox] = detections[i].Confidence;
 
-        var results = new List<(int, Rectangle, float)>();
         for (int i = 0; i < tracked.Count; i++)
         {
             var (trackId, bbox) = tracked[i];
-            float score = detections.FirstOrDefault(d => d.Bbox == bbox).Confidence;
+            float score = scoreByBbox.TryGetValue(bbox, out var s) ? s : 0f;
 
             // 缓存到 Track 队列
-            if (!_trackFrames.ContainsKey(trackId))
-                _trackFrames[trackId] = [];
-            _trackFrames[trackId].Add((image.Clone(ctx => { }), bbox, score));
-
-            results.Add((trackId, bbox, score));
+            if (!_trackFrames.TryGetValue(trackId, out var frames))
+            {
+                frames = [];
+                _trackFrames[trackId] = frames;
+            }
+            // 缓存 bbox 裁剪图而非整帧，大幅降低内存占用
+            var cropBbox = BoundingBoxHelper.ClampToBounds(bbox, image.Width, image.Height);
+            // bbox 同步转为裁剪图局部坐标（左上角为原点），保持与 Frame 图像同坐标系
+            frames.Add((
+                image.Clone(ctx => ctx.Crop(cropBbox)),
+                new Rectangle(0, 0, cropBbox.Width, cropBbox.Height),
+                score));
         }
+    }
 
-        return results;
+    /// <summary>
+    /// 统一的视频流处理循环：解码 → 逐帧检测/跟踪/缓存
+    /// </summary>
+    /// <param name="request">HTTP 请求（读取请求体视频流）</param>
+    /// <param name="codec">视频编码格式</param>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>处理成功返回 true；解码失败返回 false</returns>
+    public async Task<bool> ProcessVideoStreamAsync(
+        HttpRequest request,
+        VideoCodec codec,
+        ILogger logger,
+        double frameIntervalSeconds,
+        CancellationToken cancellationToken)
+    {
+        var enumerable = VideoDecoder.DecodeFramesAsync(
+            request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
+        await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
+
+        while (true)
+        {
+            Image<Rgb24> image;
+            try
+            {
+                if (!await enumerator.MoveNextAsync())
+                {
+                    return true;
+                }
+                image = enumerator.Current;
+            }
+            catch (Exception ex)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Log.VideoDecodeFailed(logger, ex);
+                return false;
+            }
+
+            using (image)
+            {
+                ProcessVideoFrame(image);
+            }
+        }
     }
 
     /// <summary>
@@ -87,20 +142,32 @@ public sealed class DetectService
             var (trackId, firstBbox, lastBbox, centers) = completed[i];
 
             if (!_trackFrames.TryGetValue(trackId, out var frames))
+            {
                 continue;
+            }
 
-            // 该 Track 的帧已经通过 ProcessVideoFrame 缓存
-            var pack = _fusion.FuseTrack(trackId, frames, centers);
+            try
+            {
+                // 该 Track 的帧已经通过 ProcessVideoFrame 缓存
+                var pack = _fusion.FuseTrack(trackId, CollectionsMarshal.AsSpan(frames), centers);
 
-            // 释放缓存的帧
-            foreach (var (frame, _, _) in frames)
-                frame.Dispose();
-
-            results.Add(new PersonDetection(
-                Bbox: new BoundingBox(firstBbox.X, firstBbox.Y, firstBbox.Width, firstBbox.Height),
-                Confidence: 1.0f,
-                Features: pack.VecCloth,
-                FeaturePack: pack));
+                results.Add(new PersonDetection(
+                    Bbox: new BoundingBox(firstBbox.X, firstBbox.Y, firstBbox.Width, firstBbox.Height),
+                    Confidence: 1.0f,
+                    Features: pack.VecCloth,
+                    FeaturePack: pack,
+                    TrackId: trackId));
+            }
+            catch (Exception ex)
+            {
+                Log.DetectPipelineFailed(_logger, ex);
+            }
+            finally
+            {
+                // 无论融合成功与否都释放该 Track 的缓存帧，避免 Image 泄漏
+                foreach (var (frame, _, _) in frames)
+                    frame.Dispose();
+            }
         }
 
         _trackFrames.Clear();

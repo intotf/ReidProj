@@ -1,8 +1,6 @@
 using ReidFeature.Helpers;
 using ReidFeature.Payloads;
 using ReidFeature.Services;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 
 namespace ReidFeature.Handlers
 {
@@ -106,31 +104,11 @@ namespace ReidFeature.Handlers
                 return null;
             }
 
-            // 2. 解码视频流，逐帧处理
-            var enumerable = VideoDecoder.DecodeFramesAsync(
-                request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
-            await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
-
-            while (true)
+            // 2. 解码视频流并逐帧检测/跟踪（统一由 DetectService 处理）
+            if (!await detectService.ProcessVideoStreamAsync(
+                request, codec, logger, frameIntervalSeconds, cancellationToken))
             {
-                Image<Rgb24> image;
-                try
-                {
-                    if (!await enumerator.MoveNextAsync())
-                        break;
-                    image = enumerator.Current;
-                }
-                catch (Exception ex)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    Log.VideoDecodeFailed(logger, ex);
-                    return null;
-                }
-
-                using (image)
-                {
-                    detectService.ProcessVideoFrame(image);
-                }
+                return null;
             }
 
             // 3. 获取已完成的 Track 融合结果
@@ -138,35 +116,56 @@ namespace ReidFeature.Handlers
 
             // 4. 对每个 Track 的四维特征包与所有 Gallery 成员匹配
             var bestScore = 0f;
-            var secondBestScore = 0f;
+            var secondBestScore = 0f;   // 最佳 Track 内的次佳成员得分（margin 依据）
             Person? bestPerson = null;
+            int bestTrackId = 0;
             var bestScores = new TrackSimilarityScores(0f, 0f, 0f, 0f);
 
             foreach (var track in tracks)
             {
                 if (track.FeaturePack is null)
+                {
                     continue;
+                }
+
+                // 每个 Track 独立计算最佳/次佳成员，避免跨 Track（不同人）分数污染 margin
+                float trackBest = 0f;
+                float trackSecond = 0f;
+                Person? trackBestPerson = null;
+                var trackBestScores = new TrackSimilarityScores(0f, 0f, 0f, 0f);
 
                 foreach (var member in members)
                 {
                     if (member.FeaturePack is null)
+                    {
                         continue;
+                    }
 
                     var scores = TrackFeaturePack.ComputeScores(
                         track.FeaturePack, member.FeaturePack);
                     float score = scores.ComputeTotal(wCloth, wHead, wBody, wGait);
 
-                    if (score > bestScore)
+                    if (score > trackBest)
                     {
-                        secondBestScore = bestScore;
-                        bestScore = score;
-                        bestPerson = member;
-                        bestScores = scores;
+                        trackSecond = trackBest;
+                        trackBest = score;
+                        trackBestPerson = member;
+                        trackBestScores = scores;
                     }
-                    else if (score > secondBestScore)
+                    else if (score > trackSecond)
                     {
-                        secondBestScore = score;
+                        trackSecond = score;
                     }
+                }
+
+                // 取所有 Track 中最佳匹配对；margin 依据同一 Track 内次佳成员
+                if (trackBest > bestScore)
+                {
+                    bestScore = trackBest;
+                    secondBestScore = trackSecond;
+                    bestPerson = trackBestPerson;
+                    bestTrackId = track.TrackId;
+                    bestScores = trackBestScores;
                 }
             }
 
@@ -174,13 +173,13 @@ namespace ReidFeature.Handlers
             if (bestPerson != null && bestScore > HitThreshold &&
                 (bestScore - secondBestScore) > MarginThreshold)
             {
-                Log.RecognitionResult(logger, bestPerson.Name, bestScore, 0);
+                Log.RecognitionResult(logger, bestPerson.Name, bestScore, bestTrackId);
                 return new PersonRecognition(
                     bestPerson.Id, groupId, bestPerson.Name, bestScore,
                     bestScores.Cloth, bestScores.Head, bestScores.Body, bestScores.Gait);
             }
 
-            Log.RecognitionResult(logger, "stranger", bestScore, 0);
+            Log.RecognitionResult(logger, "stranger", bestScore, bestTrackId);
             return new PersonRecognition("", groupId, "stranger", bestScore,
                 bestScores.Cloth, bestScores.Head, bestScores.Body, bestScores.Gait);
         }

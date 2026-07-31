@@ -1,8 +1,6 @@
 using ReidFeature.Helpers;
 using ReidFeature.Payloads;
 using ReidFeature.Services;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 
 namespace ReidFeature.Handlers;
 
@@ -57,32 +55,10 @@ public static class DetectHandler
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        var enumerable = VideoDecoder.DecodeFramesAsync(request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
-        await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
-
-        while (true)
+        // 解码 → 逐帧检测/跟踪/缓存（统一由 DetectService 处理）
+        if (!await detectService.ProcessVideoStreamAsync(request, codec, logger, frameIntervalSeconds, cancellationToken))
         {
-            Image<Rgb24> image;
-            try
-            {
-                if (!await enumerator.MoveNextAsync())
-                {
-                    break;
-                }
-                image = enumerator.Current;
-            }
-            catch (Exception ex)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                Log.VideoDecodeFailed(logger, ex);
-                return [];
-            }
-
-            using (image)
-            {
-                // YOLO → ByteTrack → 缓存帧
-                detectService.ProcessVideoFrame(image);
-            }
+            return [];
         }
 
         // 视频流结束后，融合所有已完成 Track 返回

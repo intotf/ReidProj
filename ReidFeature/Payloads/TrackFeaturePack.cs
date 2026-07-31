@@ -70,7 +70,9 @@ public sealed class TrackFeaturePack
     private static float CosineSimilarity(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
     {
         if (a.Length == 0 || b.Length == 0 || a.Length != b.Length)
+        {
             return 0f;
+        }
 
         var vecA = MemoryMarshal.Cast<byte, float>(a);
         var vecB = MemoryMarshal.Cast<byte, float>(b);
@@ -80,7 +82,9 @@ public sealed class TrackFeaturePack
     private static float CosineSimilarity(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (a.Length != b.Length)
+        {
             return 0f;
+        }
 
         float dot = TensorPrimitives.Dot(a, b);
         float normA = TensorPrimitives.Norm(a);
@@ -95,29 +99,11 @@ public sealed class TrackFeaturePack
     private static float VectorSimilarity(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (a.Length == 0 || b.Length == 0 || a.Length != b.Length)
+        {
             return 0f;
+        }
 
         // 逆距离映射到 [0, 1]，dist=0 → 1.0, dist=1 → 0.5, dist→∞ → 0
         return 1f / (1f + TensorPrimitives.Distance(a, b));
     }
-}
-
-/// <summary>
-/// 四维相似度分数 — 各维度独立相似度及加权总分
-/// </summary>
-public readonly record struct TrackSimilarityScores(
-    float Cloth,
-    float Head,
-    float Body,
-    float Gait)
-{
-    /// <summary>加权总分 = WCloth·Cloth + WHead·Head + WBody·Body + WGait·Gait</summary>
-    public float Total =>
-        ComputeTotal(TrackFeaturePack.WCloth, TrackFeaturePack.WHead, TrackFeaturePack.WBody, TrackFeaturePack.WGait);
-
-    /// <summary>
-    /// 按自定义权重计算加权总分
-    /// </summary>
-    public float ComputeTotal(float wCloth, float wHead, float wBody, float wGait) =>
-        wCloth * Cloth + wHead * Head + wBody * Body + wGait * Gait;
 }

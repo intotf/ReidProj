@@ -1,8 +1,6 @@
 using ReidFeature.Helpers;
 using ReidFeature.Payloads;
 using ReidFeature.Services;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 
 namespace ReidFeature.Handlers;
 
@@ -84,31 +82,11 @@ public static class EnrollmentHandler
             return Results.BadRequest("memberName 不能为空");
         }
 
-        // 处理视频流
-        var enumerable = VideoDecoder.DecodeFramesAsync(
-            request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
-        await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
-
-        while (true)
+        // 处理视频流（解码 → 逐帧检测/跟踪/缓存，统一由 DetectService 处理）
+        if (!await detectService.ProcessVideoStreamAsync(
+            request, codec, logger, frameIntervalSeconds, cancellationToken))
         {
-            Image<Rgb24> image;
-            try
-            {
-                if (!await enumerator.MoveNextAsync())
-                    break;
-                image = enumerator.Current;
-            }
-            catch (Exception ex)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                Log.VideoDecodeFailed(logger, ex);
-                return Results.BadRequest("视频解码失败");
-            }
-
-            using (image)
-            {
-                detectService.ProcessVideoFrame(image);
-            }
+            return Results.BadRequest("视频解码失败");
         }
 
         // 获取完成的 Track（取主导 Track）

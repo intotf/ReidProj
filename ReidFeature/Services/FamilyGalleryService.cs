@@ -2,7 +2,10 @@ using ReidFeature.Helpers;
 using ReidFeature.Payloads;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+using System.Buffers;
 using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace ReidFeature.Services;
@@ -53,7 +56,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
     {
         if (_groups.TryGetValue(groupId, out var entries))
         {
-            var persons = entries.Select(e => new Person(e.Id, groupId, e.Name, [])
+            var persons = entries.Select(e => new Person(e.Id, groupId, e.Name)
             {
                 FeaturePack = e.FeaturePack
             }).ToArray();
@@ -77,7 +80,9 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
                 FeaturePack = featurePack,
             };
             if (!_groups.ContainsKey(groupId))
+            {
                 _groups[groupId] = [];
+            }
             _groups[groupId].Add(entry);
         }
         else
@@ -128,7 +133,9 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
     {
         _unknownQueue.Add(pack);
         if (_unknownQueue.Count > 100)
+        {
             _unknownQueue.RemoveAt(0);
+        }
     }
 
     /// <summary>
@@ -172,26 +179,44 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
 
     private static byte[] EmaVector(byte[] oldVec, byte[] newVec)
     {
-        if (oldVec.Length == 0) return newVec;
-        if (newVec.Length == 0) return oldVec;
-        if (oldVec.Length != newVec.Length) return newVec;
+        if (oldVec.Length == 0)
+        {
+            return newVec;
+        }
+        if (newVec.Length == 0)
+        {
+            return oldVec;
+        }
+        if (oldVec.Length != newVec.Length)
+        {
+            return newVec;
+        }
 
-        var oldF = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(oldVec);
-        var newF = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(newVec);
-        var result = new float[oldF.Length];
-        var scaledNew = new float[newF.Length];
+        var oldF = MemoryMarshal.Cast<byte, float>(oldVec);
+        var newF = MemoryMarshal.Cast<byte, float>(newVec);
+        int floatDim = oldF.Length;
+        float[] poolBuffer = ArrayPool<float>.Shared.Rent(floatDim);
+        try
+        {
+            Span<float> result = poolBuffer.AsSpan(0, floatDim);
 
-        // result = oldF * (1-λ) + newF * λ（两步与标量循环乘加顺序一致，位级等价）
-        TensorPrimitives.Multiply(oldF, 1 - EmaLambda, result);
-        TensorPrimitives.Multiply(newF, EmaLambda, scaledNew);
-        TensorPrimitives.Add(result, scaledNew, result);
+            // result = oldF * (1-λ) + newF * λ（MultiplyAdd 单趟融合）
+            TensorPrimitives.Multiply(oldF, 1 - EmaLambda, result);
+            TensorPrimitives.MultiplyAdd(newF, EmaLambda, result, result);
 
-        // L2 归一化
-        float norm = TensorPrimitives.Norm(result);
-        if (norm > 1e-8f)
-            TensorPrimitives.Divide(result, norm, result);
+            // L2 归一化
+            float norm = TensorPrimitives.Norm(result);
+            if (norm > 1e-8f)
+            {
+                TensorPrimitives.Divide(result, norm, result);
+            }
 
-        return System.Runtime.InteropServices.MemoryMarshal.Cast<float, byte>(result).ToArray();
+            return MemoryMarshal.Cast<float, byte>(result).ToArray();
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(poolBuffer);
+        }
     }
 
     // ── 持久化 ──
@@ -242,7 +267,9 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
             ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "datas", "family");
 
         if (!Directory.Exists(familyDataDir))
+        {
             return;
+        }
 
         foreach (var memberDir in Directory.GetDirectories(familyDataDir))
         {
@@ -253,7 +280,9 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
                 .ToArray();
 
             if (videoFiles.Length == 0)
+            {
                 continue;
+            }
 
             // 仅处理第一个视频文件
             var videoPath = videoFiles[0];
@@ -279,27 +308,29 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
 
                 await foreach (var image in VideoDecoder.DecodeFramesAsync(fs, codec, _logger, 0, CancellationToken.None))
                 {
-                    var detections = _yolo.DetectPersons(image);
-                    if (detections.Count == 0)
+                    using (image)
                     {
-                        image.Dispose();
-                        continue;
-                    }
+                        var detections = _yolo.DetectPersons(image);
+                        if (detections.Count == 0)
+                        {
+                            continue;
+                        }
 
-                    var input = detections.Select(d => (d.Bbox, d.Confidence)).ToList();
-                    var tracked = tracker.Update(input);
+                        var tracked = tracker.Update(detections);
 
-                    // 缓存属于同一个主导 Track 的帧
-                    if (tracked.Count > 0)
-                    {
-                        // 取当前帧置信度最高的 Track
-                        var bestTrack = tracked[0];
-                        frames.Add((image, bestTrack.Bbox,
-                            detections.First(d => d.Bbox == bestTrack.Bbox).Confidence));
-                    }
-                    else
-                    {
-                        image.Dispose();
+                        // 缓存属于同一个主导 Track 的帧（bbox 裁剪图，降低内存占用）
+                        if (tracked.Count > 0)
+                        {
+                            // 取当前帧置信度最高的 Track
+                            var bestTrack = tracked[0];
+                            float score = detections.First(d => d.Bbox == bestTrack.Bbox).Confidence;
+                            var cropBbox = BoundingBoxHelper.ClampToBounds(bestTrack.Bbox, image.Width, image.Height);
+                            // bbox 同步转为裁剪图局部坐标（左上角为原点），保持与 Frame 图像同坐标系
+                            frames.Add((
+                                image.Clone(ctx => ctx.Crop(cropBbox)),
+                                new Rectangle(0, 0, cropBbox.Width, cropBbox.Height),
+                                score));
+                        }
                     }
                 }
 
@@ -312,7 +343,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
                     if (frames.Count > 3)
                     {
                         var fusion = scope.ServiceProvider.GetRequiredService<TrackFusionService>();
-                        var pack = fusion.FuseTrack(best.TrackId, frames, best.Centers);
+                        var pack = fusion.FuseTrack(best.TrackId, CollectionsMarshal.AsSpan(frames), best.Centers);
                         var groupId = "default";
                         await EnrollAsync(groupId, memberName, pack, CancellationToken.None);
                     }

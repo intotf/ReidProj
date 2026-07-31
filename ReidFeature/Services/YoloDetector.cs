@@ -104,7 +104,9 @@ public sealed class YoloDetector : IDisposable
                 // 只检查人物类别（class 0）的置信度
                 float score = outputSpan[4 * stride + i];
                 if (score < ConfidenceThreshold)
+                {
                     continue;
+                }
 
                 // bbox 四通道: cx, cy, w, h（像素坐标，0-640）
                 float cx = outputSpan[0 * stride + i];
@@ -200,63 +202,87 @@ public sealed class YoloDetector : IDisposable
     {
         var selected = new List<(Rectangle Bbox, float Confidence)>();
         if (candidates.IsEmpty)
+        {
             return selected;
+        }
 
         // 按置信度降序排序
         candidates.Sort((a, b) => b.Score.CompareTo(a.Score));
 
         int count = candidates.Length;
-        var removed = new bool[count];
-
-        for (int i = 0; i < count; i++)
+        // count 约 8400（~8.4KB），从 ArrayPool 租借避免每次分配
+        bool[] removedBuffer = ArrayPool<bool>.Shared.Rent(count);
+        try
         {
-            if (removed[i])
-                continue;
+            Array.Clear(removedBuffer, 0, count);
+            var removed = removedBuffer.AsSpan(0, count);
 
-            var (x1, y1, w1, h1, score) = candidates[i];
-            // 跳过无效框（宽度或高度非正数）
-            if (w1 <= 0 || h1 <= 0)
-                continue;
-
-            float left1 = Math.Max(0, x1);
-            float top1 = Math.Max(0, y1);
-            float right1 = left1 + w1;
-            float bottom1 = top1 + h1;
-            float area1 = w1 * h1;
-
-            selected.Add((new Rectangle(
-                (int)left1, (int)top1, (int)(right1 - left1), (int)(bottom1 - top1)), score));
-
-            for (int j = i + 1; j < count; j++)
+            for (int i = 0; i < count; i++)
             {
-                if (removed[j])
+                if (removed[i])
+                {
                     continue;
+                }
 
-                var (x2, y2, w2, h2, _) = candidates[j];
-                if (w2 <= 0 || h2 <= 0)
+                var (x1, y1, w1, h1, score) = candidates[i];
+                // 跳过无效框（宽度或高度非正数）
+                if (w1 <= 0 || h1 <= 0)
+                {
                     continue;
+                }
 
-                float left2 = Math.Max(0, x2);
-                float top2 = Math.Max(0, y2);
-                float right2 = left2 + w2;
-                float bottom2 = top2 + h2;
+                float left1 = Math.Max(0, x1);
+                float top1 = Math.Max(0, y1);
+                float right1 = left1 + w1;
+                float bottom1 = top1 + h1;
+                float area1 = w1 * h1;
 
-                // 计算 IoU
-                float interLeft = Math.Max(left1, left2);
-                float interTop = Math.Max(top1, top2);
-                float interRight = Math.Min(right1, right2);
-                float interBottom = Math.Min(bottom1, bottom2);
+                selected.Add((new Rectangle(
+                    (int)left1, (int)top1, (int)(right1 - left1), (int)(bottom1 - top1)), score));
 
-                if (interLeft >= interRight || interTop >= interBottom)
-                    continue;
+                for (int j = i + 1; j < count; j++)
+                {
+                    if (removed[j])
+                    {
+                        continue;
+                    }
 
-                float interArea = (interRight - interLeft) * (interBottom - interTop);
-                float area2 = w2 * h2;
-                float iou = interArea / (area1 + area2 - interArea);
+                    var (x2, y2, w2, h2, _) = candidates[j];
+                    if (w2 <= 0 || h2 <= 0)
+                    {
+                        continue;
+                    }
 
-                if (iou > NmsThreshold)
-                    removed[j] = true;
+                    float left2 = Math.Max(0, x2);
+                    float top2 = Math.Max(0, y2);
+                    float right2 = left2 + w2;
+                    float bottom2 = top2 + h2;
+
+                    // 计算 IoU
+                    float interLeft = Math.Max(left1, left2);
+                    float interTop = Math.Max(top1, top2);
+                    float interRight = Math.Min(right1, right2);
+                    float interBottom = Math.Min(bottom1, bottom2);
+
+                    if (interLeft >= interRight || interTop >= interBottom)
+                    {
+                        continue;
+                    }
+
+                    float interArea = (interRight - interLeft) * (interBottom - interTop);
+                    float area2 = w2 * h2;
+                    float iou = interArea / (area1 + area2 - interArea);
+
+                    if (iou > NmsThreshold)
+                    {
+                        removed[j] = true;
+                    }
+                }
             }
+        }
+        finally
+        {
+            ArrayPool<bool>.Shared.Return(removedBuffer);
         }
 
         return selected;
