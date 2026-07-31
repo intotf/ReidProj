@@ -102,7 +102,7 @@ public sealed class FaceDetector : IDisposable
         float padX = (InputSize - newW) / 2f;
         float padY = (InputSize - newH) / 2f;
 
-        using var resized = image.Clone(ctx => ctx.Resize(newW, newH, KnownResamplers.Bicubic));
+        using var resized = image.Clone(ctx => ctx.Resize(newW, newH, KnownResamplers.Lanczos3));
         using var canvas = new Image<Rgb24>(InputSize, InputSize, PadColor);
         canvas.Mutate(ctx => ctx.DrawImage(resized, new Point((int)padX, (int)padY), 1f));
 

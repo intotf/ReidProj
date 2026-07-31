@@ -158,7 +158,7 @@ public sealed class YoloDetector : IDisposable
         int newW = (int)(src.Width * scale);
         int newH = (int)(src.Height * scale);
 
-        using var resized = src.Clone(ctx => ctx.Resize(newW, newH, KnownResamplers.Bicubic));
+        using var resized = src.Clone(ctx => ctx.Resize(newW, newH, KnownResamplers.Lanczos3));
         var canvas = new Image<Rgb24>(targetSize, targetSize, new Rgb24(114, 114, 114));
         int offsetX = (targetSize - newW) / 2;
         int offsetY = (targetSize - newH) / 2;

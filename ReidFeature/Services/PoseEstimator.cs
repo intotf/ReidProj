@@ -60,8 +60,19 @@ public sealed class PoseEstimator : IDisposable
     {
         var sw = Stopwatch.StartNew();
 
-        // 1. Resize 到 192×192
-        using var resized = crop.Clone(ctx => ctx.Resize(InputSize, InputSize, KnownResamplers.Bicubic));
+        // 1. Letterbox resize — 保持宽高比缩放到 192×192，居中黑色填充
+        //    避免直接拉伸导致人物横纵比例失真，从而影响体型标量（头身比/肩髋比）的准确性
+        float scale = Math.Min((float)InputSize / crop.Width, (float)InputSize / crop.Height);
+        int newW = Math.Max(1, (int)(crop.Width * scale));
+        int newH = Math.Max(1, (int)(crop.Height * scale));
+        float padX = (InputSize - newW) / 2f;
+        float padY = (InputSize - newH) / 2f;
+
+        using var resized = crop.Clone(ctx =>
+        {
+            ctx.Resize(newW, newH, KnownResamplers.Lanczos3);
+            ctx.Pad(InputSize, InputSize, Color.Black);
+        });
 
         // 2. 构建 NHWC tensor (1×192×192×3)
         //    注意：PINTO 导出的 MoveNet ONNX 内嵌归一化公式为 data * 1.0，
@@ -126,10 +137,11 @@ public sealed class PoseEstimator : IDisposable
                 float xNorm = outputSpan[baseIdx + 1];
                 float conf = outputSpan[baseIdx + 2];
 
-                // MoveNet 输出为 [0,1] 归一化坐标，乘以裁剪图尺寸映射回像素空间
+                // MoveNet 输出为 [0,1] 归一化坐标（相对 192×192 画布），
+                // 反 letterbox 映射回裁剪图像素空间
                 keypoints[i] = (
-                    yNorm * crop.Height,
-                    xNorm * crop.Width,
+                    (yNorm * InputSize - padY) / scale,
+                    (xNorm * InputSize - padX) / scale,
                     conf
                 );
             }
