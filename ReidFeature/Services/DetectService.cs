@@ -38,16 +38,15 @@ public sealed class DetectService
     /// 将当前帧的检测结果按 TrackId 缓存
     /// </summary>
     /// <param name="image">当前帧 RGB 图像</param>
-    /// <param name="frameIndex">帧序号</param>
     /// <returns>跟踪结果列表 (trackId, bbox, 置信度)</returns>
-    public List<(int TrackId, Rectangle Bbox, float Score)> ProcessVideoFrame(Image<Rgb24> image, int frameIndex)
+    public List<(int TrackId, Rectangle Bbox, float Score)> ProcessVideoFrame(Image<Rgb24> image)
     {
         var detections = _yolo.DetectPersons(image);
         if (detections.Count == 0)
             return [];
 
         var input = detections.Select(d => (d.Bbox, d.Confidence)).ToList();
-        var tracked = _tracker.Update(input, frameIndex);
+        var tracked = _tracker.Update(input);
 
         var results = new List<(int, Rectangle, float)>();
         for (int i = 0; i < tracked.Count; i++)
@@ -78,7 +77,7 @@ public sealed class DetectService
 
         for (int i = 0; i < completed.Count; i++)
         {
-            var (trackId, startFrame, endFrame, firstBbox, lastBbox, centers) = completed[i];
+            var (trackId, firstBbox, lastBbox, centers) = completed[i];
 
             if (!_trackFrames.TryGetValue(trackId, out var frames))
                 continue;
@@ -91,7 +90,6 @@ public sealed class DetectService
                 frame.Dispose();
 
             results.Add(new PersonDetection(
-                FrameIndex: startFrame,
                 Bbox: new BoundingBox(firstBbox.X, firstBbox.Y, firstBbox.Width, firstBbox.Height),
                 Confidence: 1.0f,
                 Features: pack.VecCloth,

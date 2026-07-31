@@ -9,6 +9,15 @@ namespace ReidFeature.Payloads;
 /// </summary>
 public sealed class TrackFeaturePack
 {
+    /// <summary>全身 ReID 权重</summary>
+    public const float WCloth = 0.20f;
+    /// <summary>头肩 ReID 权重</summary>
+    public const float WHead = 0.30f;
+    /// <summary>体型标量权重</summary>
+    public const float WBody = 0.30f;
+    /// <summary>步态标量权重</summary>
+    public const float WGait = 0.20f;
+
     /// <summary>全身 ReID 特征向量（ResNet50-IBN-a 2048-d L2 归一化）</summary>
     public byte[] VecCloth { get; set; } = [];
 
@@ -30,17 +39,22 @@ public sealed class TrackFeaturePack
     /// <returns>加权融合相似度 [0, 1]</returns>
     public static float WeightedCosineSimilarity(TrackFeaturePack a, TrackFeaturePack b)
     {
-        const float wCloth = 0.20f;
-        const float wHead = 0.30f;
-        const float wBody = 0.30f;
-        const float wGait = 0.20f;
+        return ComputeScores(a, b).Total;
+    }
 
-        float clothSim = CosineSimilarity(a.VecCloth, b.VecCloth);
-        float headSim = CosineSimilarity(a.VecHead, b.VecHead);
-        float bodySim = VectorSimilarity(a.BodySignals, b.BodySignals);
-        float gaitSim = VectorSimilarity(a.GaitSignals, b.GaitSignals);
-
-        return wCloth * clothSim + wHead * headSim + wBody * bodySim + wGait * gaitSim;
+    /// <summary>
+    /// 计算两个特征包各维度的独立相似度及加权总分
+    /// </summary>
+    /// <param name="a">特征包 A</param>
+    /// <param name="b">特征包 B</param>
+    /// <returns>四维相似度分数</returns>
+    public static TrackSimilarityScores ComputeScores(TrackFeaturePack a, TrackFeaturePack b)
+    {
+        return new TrackSimilarityScores(
+            CosineSimilarity(a.VecCloth, b.VecCloth),
+            CosineSimilarity(a.VecHead, b.VecHead),
+            VectorSimilarity(a.BodySignals, b.BodySignals),
+            VectorSimilarity(a.GaitSignals, b.GaitSignals));
     }
 
     private static float CosineSimilarity(byte[] a, byte[] b)
@@ -83,4 +97,21 @@ public sealed class TrackFeaturePack
         // 逆距离映射到 [0, 1]，dist=0 → 1.0, dist=1 → 0.5, dist→∞ → 0
         return 1f / (1f + MathF.Sqrt(distSq));
     }
+}
+
+/// <summary>
+/// 四维相似度分数 — 各维度独立相似度及加权总分
+/// </summary>
+public readonly record struct TrackSimilarityScores(
+    float Cloth,
+    float Head,
+    float Body,
+    float Gait)
+{
+    /// <summary>加权总分 = WCloth·Cloth + WHead·Head + WBody·Body + WGait·Gait</summary>
+    public float Total =>
+        TrackFeaturePack.WCloth * Cloth +
+        TrackFeaturePack.WHead * Head +
+        TrackFeaturePack.WBody * Body +
+        TrackFeaturePack.WGait * Gait;
 }

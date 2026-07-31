@@ -250,7 +250,6 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
             {
                 await using var fs = File.OpenRead(videoPath);
                 var frames = new List<(Image<Rgb24> Frame, Rectangle Bbox, float Score)>();
-                int frameIndex = 0;
 
                 using var scope = _scopeFactory.CreateScope();
                 var tracker = scope.ServiceProvider.GetRequiredService<ByteTrackTracker>();
@@ -266,7 +265,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
                     }
 
                     var input = detections.Select(d => (d.Bbox, d.Confidence)).ToList();
-                    var tracked = tracker.Update(input, frameIndex++);
+                    var tracked = tracker.Update(input);
 
                     // 缓存属于同一个主导 Track 的帧
                     if (tracked.Count > 0)

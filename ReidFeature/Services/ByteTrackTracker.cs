@@ -26,9 +26,8 @@ public sealed class ByteTrackTracker
     /// 使用当前帧检测结果更新跟踪器
     /// </summary>
     /// <param name="detections">当前帧检测到的人物 bbox 列表</param>
-    /// <param name="frameIndex">当前帧序号</param>
     /// <returns>跟踪结果列表 (trackId, bbox)</returns>
-    public List<(int TrackId, Rectangle Bbox)> Update(List<(Rectangle Bbox, float Score)> detections, int frameIndex)
+    public List<(int TrackId, Rectangle Bbox)> Update(List<(Rectangle Bbox, float Score)> detections)
     {
         // 1. 所有活跃 Track 做预测
         foreach (var track in _tracks.Values)
@@ -40,7 +39,7 @@ public sealed class ByteTrackTracker
         // 2. 第一次关联: 高分 Track ↔ 高分检测 (IoU ≥ 0.5)
         var highScoreDets = detections.Where(d => d.Score >= 0.5f).ToList();
         var activeTracks = _tracks.Values.Where(t => !t.IsRemoved).ToList();
-        var matched1 = LinearAssignment(activeTracks, highScoreDets, frameIndex);
+        var matched1 = LinearAssignment(activeTracks, highScoreDets);
 
         // 3. 第二次关联: 低分 Track ↔ 低分检测
         var unmatchedTracks = activeTracks.Where(t => !matched1.Item1.Contains(t)).ToList();
@@ -70,7 +69,7 @@ public sealed class ByteTrackTracker
                 continue;
 
             var (bbox, score) = detections[i];
-            var track = new Tracklet(_nextTrackId++, frameIndex, bbox, score);
+            var track = new Tracklet(_nextTrackId++, bbox, score);
             _tracks[track.TrackId] = track;
         }
 
@@ -101,21 +100,19 @@ public sealed class ByteTrackTracker
     /// 获取所有已完成 Track 的特征包（按存活帧数降序）
     /// 返回后清空已完成队列
     /// </summary>
-    /// <returns>已完成 Track 列表（trackId, 起止帧, bbox 序列）</returns>
-    public List<(int TrackId, int StartFrame, int EndFrame, Rectangle FirstBbox, Rectangle LastBbox, PointF[] Centers)> FlushCompletedTracks()
+    /// <returns>已完成 Track 列表（trackId, bbox 序列）</returns>
+    public List<(int TrackId, Rectangle FirstBbox, Rectangle LastBbox, PointF[] Centers)> FlushCompletedTracks()
     {
         // 视频流结束时，把已移除的 Track 和仍活跃的 Track 一并返回
         var result = _tracks.Values
             .Where(t => t.IsActive && !t.IsRemoved)
             .Concat(_completedTracks)
+            .OrderByDescending(t => t.Age)
             .Select(t => (
                 t.TrackId,
-                t.FirstFrame,
-                t.LastFrame,
                 t.FirstBbox,
                 t.LastBbox,
                 t.CenterHistory.ToArray()))
-            .OrderByDescending(x => x.LastFrame - x.FirstFrame)
             .ToList();
 
         // 清理已返回（已移除或仍活跃）的 Track，避免重复返回
@@ -134,7 +131,7 @@ public sealed class ByteTrackTracker
     /// 匈牙利算法线性分配 — 基于 IoU 代价矩阵
     /// </summary>
     private static (List<Tracklet> MatchedTracks, HashSet<int> MatchedDetIndices) LinearAssignment(
-        List<Tracklet> tracks, List<(Rectangle Bbox, float Score)> detections, int frameIndex)
+        List<Tracklet> tracks, List<(Rectangle Bbox, float Score)> detections)
     {
         var matchedTracks = new List<Tracklet>();
         var matchedDetIndices = new HashSet<int>();
@@ -166,7 +163,7 @@ public sealed class ByteTrackTracker
             float iou = 1f - costMatrix[i, j];
             if (iou >= MatchThreshold)
             {
-                tracks[i].Update(frameIndex, detections[j].Bbox, detections[j].Score);
+                tracks[i].Update(detections[j].Bbox, detections[j].Score);
                 matchedTracks.Add(tracks[i]);
                 matchedDetIndices.Add(j);
             }
@@ -204,7 +201,7 @@ public sealed class ByteTrackTracker
 
             if (bestIdx >= 0)
             {
-                track.Update(track.LastFrame + 1, detections[bestIdx].Bbox, detections[bestIdx].Score);
+                track.Update(detections[bestIdx].Bbox, detections[bestIdx].Score);
                 matchedTracks.Add(track);
                 matchedDetIndices.Add(bestIdx);
             }
@@ -246,8 +243,6 @@ public sealed class ByteTrackTracker
     private sealed class Tracklet
     {
         public int TrackId { get; }
-        public int FirstFrame { get; private set; }
-        public int LastFrame { get; private set; }
         public Rectangle FirstBbox { get; }
         public Rectangle LastBbox { get; private set; }
         public float MaxScore { get; private set; }
@@ -262,11 +257,9 @@ public sealed class ByteTrackTracker
 
         private readonly KalmanFilter8 _kalman;
 
-        public Tracklet(int id, int frameIndex, Rectangle bbox, float score)
+        public Tracklet(int id, Rectangle bbox, float score)
         {
             TrackId = id;
-            FirstFrame = frameIndex;
-            LastFrame = frameIndex;
             FirstBbox = bbox;
             LastBbox = bbox;
             MaxScore = score;
@@ -280,9 +273,8 @@ public sealed class ByteTrackTracker
             _kalman = new KalmanFilter8(cx, cy, bbox.Width, bbox.Height);
         }
 
-        public void Update(int frameIndex, Rectangle bbox, float score)
+        public void Update(Rectangle bbox, float score)
         {
-            LastFrame = frameIndex;
             LastBbox = bbox;
             HitStreak++;
             LostFrames = 0;

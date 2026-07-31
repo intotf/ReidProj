@@ -18,7 +18,7 @@ public static class DetectHandler
         HttpContext context,
         DetectService detectService,
         ILogger<Program> logger,
-        double frameIntervalSeconds = 5,
+        double frameIntervalSeconds = 0.5,
         CancellationToken cancellationToken = default)
     {
         return await HandleVideoAsync(context.Request, detectService, VideoCodec.H264, frameIntervalSeconds, logger, cancellationToken);
@@ -31,7 +31,7 @@ public static class DetectHandler
         HttpContext context,
         DetectService detectService,
         ILogger<Program> logger,
-        double frameIntervalSeconds = 5,
+        double frameIntervalSeconds = 0.5,
         CancellationToken cancellationToken = default)
     {
         return await HandleVideoAsync(context.Request, detectService, VideoCodec.H265, frameIntervalSeconds, logger, cancellationToken);
@@ -51,7 +51,6 @@ public static class DetectHandler
             return [];
         }
 
-        var frameIdx = 0;
         var enumerable = VideoDecoder.DecodeFramesAsync(request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
         await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
 
@@ -76,10 +75,8 @@ public static class DetectHandler
             using (image)
             {
                 // YOLO → ByteTrack → 缓存帧
-                detectService.ProcessVideoFrame(image, frameIdx);
+                detectService.ProcessVideoFrame(image);
             }
-
-            frameIdx++;
         }
 
         // 视频流结束后，融合所有已完成 Track 返回

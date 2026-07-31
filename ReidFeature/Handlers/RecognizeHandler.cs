@@ -17,22 +17,16 @@ namespace ReidFeature.Handlers
         /// <summary>命中与次高分的最小差距</summary>
         private const float MarginThreshold = 0.08f;
 
-        /// <summary>四维匹配权重</summary>
-        private const float WCloth = 0.20f;
-        private const float WHead = 0.30f;
-        private const float WBody = 0.30f;
-        private const float WGait = 0.20f;
-
         /// <summary>
         /// 处理 H264 视频流识别 — 收集所有帧后四维融合匹配，只返回最佳结果
         /// </summary>
-        public static async Task<PersonRecognition> HandleH264StreamAsync(
+        public static async Task<PersonRecognition?> HandleH264StreamAsync(
             IFamilyMemberProvider familyProvider,
             HttpContext context,
             DetectService detectService,
             ILogger<Program> logger,
             string groupId,
-            double frameIntervalSeconds = 5,
+            double frameIntervalSeconds = 0.5,
             CancellationToken cancellationToken = default)
         {
             return await RecognizeVideoAsync(
@@ -43,13 +37,13 @@ namespace ReidFeature.Handlers
         /// <summary>
         /// 处理 H265 视频流识别 — 收集所有帧后四维融合匹配，只返回最佳结果
         /// </summary>
-        public static async Task<PersonRecognition> HandleH265StreamAsync(
+        public static async Task<PersonRecognition?> HandleH265StreamAsync(
             IFamilyMemberProvider familyProvider,
             HttpContext context,
             DetectService detectService,
             ILogger<Program> logger,
             string groupId,
-            double frameIntervalSeconds = 5,
+            double frameIntervalSeconds = 0.5,
             CancellationToken cancellationToken = default)
         {
             return await RecognizeVideoAsync(
@@ -57,7 +51,7 @@ namespace ReidFeature.Handlers
                 groupId, VideoCodec.H265, frameIntervalSeconds, cancellationToken);
         }
 
-        private static async Task<PersonRecognition> RecognizeVideoAsync(
+        private static async Task<PersonRecognition?> RecognizeVideoAsync(
             IFamilyMemberProvider familyProvider,
             HttpRequest request,
             DetectService detectService,
@@ -70,19 +64,17 @@ namespace ReidFeature.Handlers
             if (request.ContentLength == null || request.ContentLength == 0)
             {
                 Log.RequestBodyEmpty(logger);
-                return new PersonRecognition("", groupId, "stranger", 0f);
+                return null;
             }
 
             // 1. 获取 Gallery 成员
             var members = await familyProvider.GetMembersAsync(groupId, cancellationToken);
             if (members.Length == 0)
             {
-                return new PersonRecognition("", groupId, "stranger", 0f);
+                return null;
             }
 
             // 2. 解码视频流，逐帧处理
-            int frameIdx = 0;
-
             var enumerable = VideoDecoder.DecodeFramesAsync(
                 request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
             await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
@@ -100,12 +92,12 @@ namespace ReidFeature.Handlers
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     Log.VideoDecodeFailed(logger, ex);
-                    return new PersonRecognition("", groupId, "stranger", 0f);
+                    return null;
                 }
 
                 using (image)
                 {
-                    detectService.ProcessVideoFrame(image, frameIdx++);
+                    detectService.ProcessVideoFrame(image);
                 }
             }
 
@@ -116,6 +108,7 @@ namespace ReidFeature.Handlers
             var bestScore = 0f;
             var secondBestScore = 0f;
             Person? bestPerson = null;
+            var bestScores = new TrackSimilarityScores(0f, 0f, 0f, 0f);
 
             foreach (var track in tracks)
             {
@@ -127,14 +120,16 @@ namespace ReidFeature.Handlers
                     if (member.FeaturePack is null)
                         continue;
 
-                    float score = TrackFeaturePack.WeightedCosineSimilarity(
+                    var scores = TrackFeaturePack.ComputeScores(
                         track.FeaturePack, member.FeaturePack);
+                    float score = scores.Total;
 
                     if (score > bestScore)
                     {
                         secondBestScore = bestScore;
                         bestScore = score;
                         bestPerson = member;
+                        bestScores = scores;
                     }
                     else if (score > secondBestScore)
                     {
@@ -149,11 +144,13 @@ namespace ReidFeature.Handlers
             {
                 Log.RecognitionResult(logger, bestPerson.Name, bestScore, 0);
                 return new PersonRecognition(
-                    bestPerson.Id, groupId, bestPerson.Name, bestScore);
+                    bestPerson.Id, groupId, bestPerson.Name, bestScore,
+                    bestScores.Cloth, bestScores.Head, bestScores.Body, bestScores.Gait);
             }
 
             Log.RecognitionResult(logger, "stranger", bestScore, 0);
-            return new PersonRecognition("", groupId, "stranger", bestScore);
+            return new PersonRecognition("", groupId, "stranger", bestScore,
+                bestScores.Cloth, bestScores.Head, bestScores.Body, bestScores.Gait);
         }
     }
 }

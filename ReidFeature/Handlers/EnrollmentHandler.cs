@@ -22,7 +22,7 @@ public static class EnrollmentHandler
         ILogger<Program> logger,
         string groupId,
         string memberName,
-        double frameIntervalSeconds = 0,
+        double frameIntervalSeconds = 0.5,
         CancellationToken cancellationToken = default)
     {
         return await EnrollVideoAsync(
@@ -40,7 +40,7 @@ public static class EnrollmentHandler
         ILogger<Program> logger,
         string groupId,
         string memberName,
-        double frameIntervalSeconds = 0,
+        double frameIntervalSeconds = 0.5,
         CancellationToken cancellationToken = default)
     {
         return await EnrollVideoAsync(
@@ -73,8 +73,6 @@ public static class EnrollmentHandler
         }
 
         // 处理视频流
-        int frameIdx = 0;
-
         var enumerable = VideoDecoder.DecodeFramesAsync(
             request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
         await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
@@ -97,7 +95,7 @@ public static class EnrollmentHandler
 
             using (image)
             {
-                detectService.ProcessVideoFrame(image, frameIdx++);
+                detectService.ProcessVideoFrame(image);
             }
         }
 
