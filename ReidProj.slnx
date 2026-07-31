@@ -5,4 +5,5 @@
   <Project Path="ReidSample/ReIdSample.csproj" />
   <Project Path="MediaDownloader/MediaDownloader.csproj" />
   <Project Path="ReIdCli/ReIdCli.csproj" />
+  <Project Path="ReIdFaceBox/ReIdFaceBox.csproj" />
 </Solution>

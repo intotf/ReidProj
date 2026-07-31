@@ -154,7 +154,7 @@ try
                     allMatches.Add((frameName, rec));
                     Console.WriteLine($"     人物: {rec.Name} (ID: {rec.Id}) | " +
                                       $"相似度: {rec.ReidSimilarity:F4} | " +
-                                      $"来源图片: {rec.SourceFile ?? "未知"}");
+                                      $"面部相似度: {rec.FaceSimilarity:F4}");
                 }
             }
             else
@@ -178,13 +178,15 @@ try
 
     if (allMatches.Count > 0)
     {
-        var best = allMatches.OrderByDescending(m => m.Rec.ReidSimilarity).First();
+        var best = allMatches.OrderByDescending(m => m.Rec.FaceSimilarity)
+                             .ThenByDescending(m => m.Rec.ReidSimilarity)
+                             .First();
         Console.WriteLine();
         Console.WriteLine("🏆 最高相似度匹配:");
         Console.WriteLine($"     帧:      {best.FrameName}");
         Console.WriteLine($"     人物:    {best.Rec.Name} (ID: {best.Rec.Id})");
         Console.WriteLine($"     相似度:  {best.Rec.ReidSimilarity:F4}");
-        Console.WriteLine($"     目标图片: {best.Rec.SourceFile ?? "未知"}");
+        Console.WriteLine($"     面部相似度:  {best.Rec.FaceSimilarity:F4}");
     }
 
     if (matchedDir != null)
@@ -315,8 +317,8 @@ public class PersonRecognition
     public string Id { get; set; } = "";
     public string GroupId { get; set; } = "";
     public string Name { get; set; } = "";
+    public float FaceSimilarity { get; set; }
     public float ReidSimilarity { get; set; }
-    public string? SourceFile { get; set; }
 }
 
 /// <summary>

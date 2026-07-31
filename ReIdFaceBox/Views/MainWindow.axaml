@@ -1,0 +1,98 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ReIdFaceBox.ViewModels"
+        x:Class="ReIdFaceBox.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="ReIdFaceBox - 人物/人脸检测可视化"
+        Width="1200" Height="800"
+        WindowStartupLocation="CenterScreen">
+
+    <DockPanel>
+        <!-- 顶部工具栏 -->
+        <Border DockPanel.Dock="Top" Padding="8" Background="#f5f5f5">
+            <StackPanel Spacing="8">
+                <!-- 第一行：操作按钮 -->
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="选择图片" Click="OnSelectImages" IsEnabled="{Binding !IsProcessing}" />
+                    <Button Content="选择视频(MP4)" Click="OnSelectVideo" IsEnabled="{Binding !IsProcessing}" />
+                    <Button Content="取消" Command="{Binding CancelProcessingCommand}" IsVisible="{Binding IsProcessing}" />
+                    <Separator />
+                    <Button Content="全部对比" Click="OnRecognizeAll" IsEnabled="{Binding !IsProcessing}" />
+                    <Button Content="提取目标数据" Click="OnExtractTargets" IsEnabled="{Binding !IsProcessing}" />
+                    <Separator />
+                    <Button Content="保存配置" Command="{Binding SaveConfigCommand}" />
+                    <Button Content="加载配置" Command="{Binding LoadConfigCommand}" />
+                </StackPanel>
+
+                <!-- 第二行：配置参数 -->
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="服务地址:" VerticalAlignment="Center" />
+                    <TextBox Text="{Binding ReidServiceUrl}" Width="200" />
+                    <TextBlock Text="FFmpeg:" VerticalAlignment="Center" />
+                    <TextBox Text="{Binding FfmpegPath}" Width="250" />
+                    <TextBlock Text="Flags:" VerticalAlignment="Center" />
+                    <NumericUpDown Value="{Binding DetectionFlags}" Width="120" />
+                    <TextBlock Text="对比组:" VerticalAlignment="Center" />
+                    <TextBox Text="{Binding GroupId}" Width="100" />
+                    <TextBlock Text="阈值:" VerticalAlignment="Center" />
+                    <NumericUpDown Value="{Binding SimilarityThreshold}" Minimum="0" Maximum="1" Increment="0.05" FormatString="F2" Width="120" />
+                </StackPanel>
+
+                <!-- 第三行：ffmpeg 参数 -->
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="抽帧参数:" VerticalAlignment="Center" />
+                    <TextBox Text="{Binding FfmpegArgs}" HorizontalAlignment="Stretch" MinWidth="500" />
+                    <TextBlock Text="-vf fps=3 每秒抽3帧; -q:v 2 质量(2~31,越小越高)" VerticalAlignment="Center" Foreground="Gray" FontSize="12" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- 底部状态栏 -->
+        <Border DockPanel.Dock="Bottom" Padding="8,4" Background="#e8e8e8">
+            <StackPanel Orientation="Horizontal" Spacing="16">
+                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" />
+                <TextBlock VerticalAlignment="Center">
+                    <TextBlock.Text>
+                        <MultiBinding StringFormat="{}{0}/{1}">
+                            <Binding Path="ProcessedCount" />
+                            <Binding Path="TotalCount" />
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
+        <!-- 主内容区：可滚动的图片列表 -->
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding ResultImages}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Margin="8" BorderBrush="#ccc" BorderThickness="1" CornerRadius="4" Padding="4">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="{Binding FileName}" FontWeight="Bold" Margin="4,0" />
+                                <TextBlock Margin="4,0">
+                                    <TextBlock.Text>
+                                        <MultiBinding StringFormat="检测到 {0} 个人物">
+                                            <Binding Path="PersonCount" />
+                                        </MultiBinding>
+                                    </TextBlock.Text>
+                                </TextBlock>
+                                <Image Source="{Binding Image}"
+                                       Stretch="Uniform"
+                                       StretchDirection="DownOnly">
+                                    <Image.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="目标对比" Click="OnRecognize" Tag="{Binding}" />
+                                            <Separator />
+                                            <MenuItem Header="另存为..." Click="OnSaveImageAs" Tag="{Binding}" />
+                                        </ContextMenu>
+                                    </Image.ContextMenu>
+                                </Image>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
