@@ -67,7 +67,7 @@ public sealed class TrackFeaturePack
             VectorSimilarity(a.GaitSignals, b.GaitSignals));
     }
 
-    private static float CosineSimilarity(byte[] a, byte[] b)
+    private static float CosineSimilarity(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
     {
         if (a.Length == 0 || b.Length == 0 || a.Length != b.Length)
             return 0f;
@@ -92,20 +92,13 @@ public sealed class TrackFeaturePack
     /// <summary>
     /// 标量向量相似度 — 对短向量使用逆欧氏距离归一化
     /// </summary>
-    private static float VectorSimilarity(float[] a, float[] b)
+    private static float VectorSimilarity(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (a.Length == 0 || b.Length == 0 || a.Length != b.Length)
             return 0f;
 
-        float distSq = 0f;
-        for (int i = 0; i < a.Length; i++)
-        {
-            float d = a[i] - b[i];
-            distSq += d * d;
-        }
-
         // 逆距离映射到 [0, 1]，dist=0 → 1.0, dist=1 → 0.5, dist→∞ → 0
-        return 1f / (1f + MathF.Sqrt(distSq));
+        return 1f / (1f + TensorPrimitives.Distance(a, b));
     }
 }
 

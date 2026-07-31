@@ -2,8 +2,8 @@ using ReidFeature.Helpers;
 using ReidFeature.Payloads;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using System.Numerics.Tensors;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace ReidFeature.Services;
 
@@ -32,7 +32,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
         _logger = logger;
         _yolo = yolo;
         _scopeFactory = scopeFactory;
-        _galleryDir = Path.Combine(AppContext.BaseDirectory, "datas", "gallery") ?? 
+        _galleryDir = Path.Combine(AppContext.BaseDirectory, "datas", "gallery") ??
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "datas", "gallery");
 
         // 启动时加载持久化数据 + 从 datas/family 注册
@@ -160,14 +160,17 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
         var oldF = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(oldVec);
         var newF = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(newVec);
         var result = new float[oldF.Length];
-        for (int i = 0; i < result.Length; i++)
-            result[i] = oldF[i] * (1 - EmaLambda) + newF[i] * EmaLambda;
+        var scaledNew = new float[newF.Length];
+
+        // result = oldF * (1-λ) + newF * λ（两步与标量循环乘加顺序一致，位级等价）
+        TensorPrimitives.Multiply(oldF, 1 - EmaLambda, result);
+        TensorPrimitives.Multiply(newF, EmaLambda, scaledNew);
+        TensorPrimitives.Add(result, scaledNew, result);
 
         // L2 归一化
-        float norm = MathF.Sqrt(result.Sum(v => v * v));
+        float norm = TensorPrimitives.Norm(result);
         if (norm > 1e-8f)
-            for (int i = 0; i < result.Length; i++)
-                result[i] /= norm;
+            TensorPrimitives.Divide(result, norm, result);
 
         return System.Runtime.InteropServices.MemoryMarshal.Cast<float, byte>(result).ToArray();
     }
@@ -272,7 +275,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
                     {
                         // 取当前帧置信度最高的 Track
                         var bestTrack = tracked[0];
-                        frames.Add((image, bestTrack.Bbox, 
+                        frames.Add((image, bestTrack.Bbox,
                             detections.First(d => d.Bbox == bestTrack.Bbox).Confidence));
                     }
                     else
