@@ -1,6 +1,4 @@
-using ReidFeature.Payloads;
 using SixLabors.ImageSharp;
-using System.Diagnostics;
 
 namespace ReidFeature.Services;
 
@@ -42,13 +40,13 @@ public sealed class ByteTrackTracker
         var matched1 = LinearAssignment(activeTracks, highScoreDets);
 
         // 3. 第二次关联: 低分 Track ↔ 低分检测
-        var unmatchedTracks = activeTracks.Where(t => !matched1.Item1.Contains(t)).ToList();
-        var unmatchedDetections = highScoreDets.Where((d, i) => !matched1.Item2.Contains(i))
+        var unmatchedTracks = activeTracks.Where(t => !matched1.MatchedTracks.Contains(t)).ToList();
+        var unmatchedDetections = highScoreDets.Where((d, i) => !matched1.MatchedDetIndices.Contains(i))
             .Concat(detections.Where(d => d.Score < 0.5f)).ToList();
         var matched2 = IoUMatching(unmatchedTracks, unmatchedDetections, 0.5f);
 
         // 4. 处理未匹配的 Track → 标记为丢失
-        foreach (var track in unmatchedTracks.Where(t => !matched2.Item1.Contains(t)))
+        foreach (var track in unmatchedTracks.Where(t => !matched2.MatchedTracks.Contains(t)))
         {
             track.LostFrames++;
             if (track.HitStreak > 0)
@@ -62,7 +60,7 @@ public sealed class ByteTrackTracker
         }
 
         // 5. 处理未匹配的检测 → 创建新 Track
-        var allMatchedDets = matched1.Item2.Concat(matched2.Item2).ToHashSet();
+        var allMatchedDets = matched1.MatchedDetIndices.Concat(matched2.MatchedDetIndices).ToHashSet();
         for (int i = 0; i < detections.Count; i++)
         {
             if (allMatchedDets.Contains(i))

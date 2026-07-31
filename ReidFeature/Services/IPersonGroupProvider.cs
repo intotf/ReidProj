@@ -18,6 +18,7 @@ namespace ReidFeature.Services
         /// <param name="groupId">分组 ID</param>
         /// <param name="name">成员名称</param>
         /// <param name="featurePack">四维特征包</param>
+        /// <param name="cancellationToken">取消标记</param>
         /// <returns>成员 ID</returns>
         Task<string> EnrollAsync(string groupId, string name, TrackFeaturePack featurePack, CancellationToken cancellationToken);
 

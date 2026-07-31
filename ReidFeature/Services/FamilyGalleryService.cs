@@ -24,6 +24,12 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
     // EMA 衰减因子
     private const float EmaLambda = 0.3f;
 
+    /// <summary>
+    /// 初始化家庭成员 Gallery 服务，并加载持久化数据与 datas/family 目录
+    /// </summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="yolo">YOLO 人物检测器（用于从 datas/family 目录注册）</param>
+    /// <param name="scopeFactory">服务作用域工厂</param>
     public FamilyGalleryService(
         ILogger<FamilyGalleryService> logger,
         YoloDetector yolo,
@@ -42,6 +48,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
 
     // ── IFamilyMemberProvider 实现 ──
 
+    /// <inheritdoc />
     public Task<Person[]> GetMembersAsync(string groupId, CancellationToken ct)
     {
         if (_groups.TryGetValue(groupId, out var entries))
@@ -55,6 +62,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
         return Task.FromResult(Array.Empty<Person>());
     }
 
+    /// <inheritdoc />
     public async Task<string> EnrollAsync(string groupId, string name, TrackFeaturePack featurePack, CancellationToken ct)
     {
         var entry = FindEntry(groupId, name);
@@ -84,6 +92,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
         return entry.Id;
     }
 
+    /// <inheritdoc />
     public Task<bool> DeleteAsync(string groupId, string memberId, CancellationToken ct)
     {
         if (_groups.TryGetValue(groupId, out var entries))
@@ -98,6 +107,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
         return Task.FromResult(false);
     }
 
+    /// <inheritdoc />
     public Task<MemberInfo[]> ListAsync(string groupId, CancellationToken ct)
     {
         if (_groups.TryGetValue(groupId, out var entries))
@@ -110,6 +120,10 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
 
     // ── 陌生人暂存 ──
 
+    /// <summary>
+    /// 暂存一个未识别人员的特征包（最多保留 100 个，超出则移除最旧的）
+    /// </summary>
+    /// <param name="pack">未识别人员的四维特征包</param>
     public void PushUnknown(TrackFeaturePack pack)
     {
         _unknownQueue.Add(pack);
@@ -117,6 +131,11 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
             _unknownQueue.RemoveAt(0);
     }
 
+    /// <summary>
+    /// 取出并移除指定数量的暂存未识别特征包
+    /// </summary>
+    /// <param name="maxCount">最多取出的数量（默认 10）</param>
+    /// <returns>暂存的特征包数组</returns>
     public TrackFeaturePack[] PopUnknowns(int maxCount = 10)
     {
         var batch = _unknownQueue.Take(maxCount).ToArray();
@@ -309,6 +328,9 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
         }
     }
 
+    /// <summary>
+    /// 释放资源并清空暂存队列
+    /// </summary>
     public void Dispose()
     {
         _unknownQueue.Clear();

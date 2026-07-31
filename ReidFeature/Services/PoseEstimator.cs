@@ -31,6 +31,11 @@ public sealed class PoseEstimator : IDisposable
     private const int LeftHip = 11;
     private const int RightHip = 12;
 
+    /// <summary>
+    /// 初始化姿态估计器并加载 MoveNet Lightning 模型
+    /// </summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="onnxOptions">ONNX 会话选项</param>
     public PoseEstimator(ILogger<PoseEstimator> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
@@ -102,7 +107,7 @@ public sealed class PoseEstimator : IDisposable
 
             // 3. ONNX 推理
             using var results = _session.Run([NamedOnnxValue.CreateFromTensor(_inputName, inputTensor)]);
-
+        
             // 4. 解析输出
             var outputTensor = (DenseTensor<float>)results[0].AsTensor<float>();
             var outputSpan = outputTensor.Buffer.Span;
@@ -198,6 +203,9 @@ public sealed class PoseEstimator : IDisposable
         return [headBodyRatio, shoulderHipRatio];
     }
 
+    /// <summary>
+    /// 释放 ONNX 推理会话
+    /// </summary>
     public void Dispose()
     {
         _session?.Dispose();
