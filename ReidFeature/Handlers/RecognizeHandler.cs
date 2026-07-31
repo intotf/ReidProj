@@ -27,11 +27,16 @@ namespace ReidFeature.Handlers
             ILogger<Program> logger,
             string groupId,
             double frameIntervalSeconds = 0.5,
+            float wCloth = TrackFeaturePack.WCloth,
+            float wHead = TrackFeaturePack.WHead,
+            float wBody = TrackFeaturePack.WBody,
+            float wGait = TrackFeaturePack.WGait,
             CancellationToken cancellationToken = default)
         {
             return await RecognizeVideoAsync(
                 familyProvider, context.Request, detectService, logger,
-                groupId, VideoCodec.H264, frameIntervalSeconds, cancellationToken);
+                groupId, VideoCodec.H264, frameIntervalSeconds,
+                wCloth, wHead, wBody, wGait, cancellationToken);
         }
 
         /// <summary>
@@ -44,11 +49,16 @@ namespace ReidFeature.Handlers
             ILogger<Program> logger,
             string groupId,
             double frameIntervalSeconds = 0.5,
+            float wCloth = TrackFeaturePack.WCloth,
+            float wHead = TrackFeaturePack.WHead,
+            float wBody = TrackFeaturePack.WBody,
+            float wGait = TrackFeaturePack.WGait,
             CancellationToken cancellationToken = default)
         {
             return await RecognizeVideoAsync(
                 familyProvider, context.Request, detectService, logger,
-                groupId, VideoCodec.H265, frameIntervalSeconds, cancellationToken);
+                groupId, VideoCodec.H265, frameIntervalSeconds,
+                wCloth, wHead, wBody, wGait, cancellationToken);
         }
 
         private static async Task<PersonRecognition?> RecognizeVideoAsync(
@@ -59,6 +69,10 @@ namespace ReidFeature.Handlers
             string groupId,
             VideoCodec codec,
             double frameIntervalSeconds,
+            float wCloth,
+            float wHead,
+            float wBody,
+            float wGait,
             CancellationToken cancellationToken)
         {
             if (request.ContentLength == null || request.ContentLength == 0)
@@ -122,7 +136,7 @@ namespace ReidFeature.Handlers
 
                     var scores = TrackFeaturePack.ComputeScores(
                         track.FeaturePack, member.FeaturePack);
-                    float score = scores.Total;
+                    float score = scores.ComputeTotal(wCloth, wHead, wBody, wGait);
 
                     if (score > bestScore)
                     {

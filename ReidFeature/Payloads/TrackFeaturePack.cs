@@ -36,10 +36,20 @@ public sealed class TrackFeaturePack
     /// </summary>
     /// <param name="a">特征包 A</param>
     /// <param name="b">特征包 B</param>
+    /// <param name="wCloth">全身 ReID 权重</param>
+    /// <param name="wHead">头肩 ReID 权重</param>
+    /// <param name="wBody">体型标量权重</param>
+    /// <param name="wGait">步态标量权重</param>
     /// <returns>加权融合相似度 [0, 1]</returns>
-    public static float WeightedCosineSimilarity(TrackFeaturePack a, TrackFeaturePack b)
+    public static float WeightedCosineSimilarity(
+        TrackFeaturePack a,
+        TrackFeaturePack b,
+        float wCloth = WCloth,
+        float wHead = WHead,
+        float wBody = WBody,
+        float wGait = WGait)
     {
-        return ComputeScores(a, b).Total;
+        return ComputeScores(a, b).ComputeTotal(wCloth, wHead, wBody, wGait);
     }
 
     /// <summary>
@@ -110,8 +120,11 @@ public readonly record struct TrackSimilarityScores(
 {
     /// <summary>加权总分 = WCloth·Cloth + WHead·Head + WBody·Body + WGait·Gait</summary>
     public float Total =>
-        TrackFeaturePack.WCloth * Cloth +
-        TrackFeaturePack.WHead * Head +
-        TrackFeaturePack.WBody * Body +
-        TrackFeaturePack.WGait * Gait;
+        ComputeTotal(TrackFeaturePack.WCloth, TrackFeaturePack.WHead, TrackFeaturePack.WBody, TrackFeaturePack.WGait);
+
+    /// <summary>
+    /// 按自定义权重计算加权总分
+    /// </summary>
+    public float ComputeTotal(float wCloth, float wHead, float wBody, float wGait) =>
+        wCloth * Cloth + wHead * Head + wBody * Body + wGait * Gait;
 }
