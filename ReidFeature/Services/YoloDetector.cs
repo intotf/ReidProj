@@ -29,6 +29,10 @@ public sealed class YoloDetector : IDisposable
     private static readonly float[] Mean = [0f, 0f, 0f];
     private static readonly float[] Std = [1f, 1f, 1f];
 
+    // YOLO letterbox 填充色：灰色(114)（Ultralytics 训练/推理标准）
+    private static readonly Color LetterboxFillColor =
+        Color.FromPixel(new Rgba32(114, 114, 114, byte.MaxValue));
+
     /// <summary>
     /// 初始化 YOLO 人物检测器，加载 ONNX 模型
     /// </summary>
@@ -155,16 +159,15 @@ public sealed class YoloDetector : IDisposable
     private static Image<Rgb24> LetterboxResize(Image<Rgb24> src, int targetSize)
     {
         float scale = Math.Min((float)targetSize / src.Width, (float)targetSize / src.Height);
-        int newW = (int)(src.Width * scale);
-        int newH = (int)(src.Height * scale);
+        int newW = Math.Max(1, (int)(src.Width * scale));
+        int newH = Math.Max(1, (int)(src.Height * scale));
 
-        using var resized = src.Clone(ctx => ctx.Resize(newW, newH, KnownResamplers.Lanczos3));
-        var canvas = new Image<Rgb24>(targetSize, targetSize, new Rgb24(114, 114, 114));
-        int offsetX = (targetSize - newW) / 2;
-        int offsetY = (targetSize - newH) / 2;
-
-        canvas.Mutate(ctx => ctx.DrawImage(resized, new Point(offsetX, offsetY), 1f));
-        return canvas;
+        // YOLO 官方 letterbox 标准：灰色(114)居中填充（训练/推理一致）
+        return src.Clone(ctx =>
+        {
+            ctx.Resize(newW, newH, KnownResamplers.Lanczos3);
+            ctx.Pad(targetSize, targetSize, LetterboxFillColor);
+        });
     }
 
 
