@@ -99,12 +99,6 @@ namespace ReidFeature.Handlers
             float wGait,
             CancellationToken cancellationToken)
         {
-            if (request.ContentLength == null || request.ContentLength == 0)
-            {
-                Log.RequestBodyEmpty(logger);
-                return null;
-            }
-
             // 1. 获取 Gallery 成员
             var members = await familyProvider.GetMembersAsync(groupId, cancellationToken);
             if (members.Length == 0)
