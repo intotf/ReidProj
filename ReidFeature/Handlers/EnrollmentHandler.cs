@@ -79,12 +79,6 @@ public static class EnrollmentHandler
     {
         var request = context.Request;
 
-        if (request.ContentLength == null || request.ContentLength == 0)
-        {
-            Log.RequestBodyEmpty(logger);
-            return Results.BadRequest("请求体为空");
-        }
-
         if (string.IsNullOrWhiteSpace(memberName))
         {
             return Results.BadRequest("memberName 不能为空");

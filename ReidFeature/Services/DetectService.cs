@@ -17,10 +17,17 @@ public sealed class DetectService
     private readonly ILogger<DetectService> _logger;
 
     /// <summary>
-    /// 当前视频流的帧缓存：trackId → List<(原图, bbox, 置信度)>
+    /// 当前视频流的帧缓存：trackId → List&lt;(原图, bbox, 置信度)&gt;
     /// </summary>
     private readonly Dictionary<int, List<(Image<Rgb24> Frame, Rectangle Bbox, float Score)>> _trackFrames = [];
 
+    /// <summary>
+    /// 初始化检测编排服务
+    /// </summary>
+    /// <param name="yolo">YOLO 人物检测器</param>
+    /// <param name="tracker">ByteTrack 跟踪器</param>
+    /// <param name="fusion">四维特征融合服务</param>
+    /// <param name="logger">日志记录器</param>
     public DetectService(
         YoloDetector yolo,
         ByteTrackTracker tracker,

@@ -21,6 +21,13 @@ public sealed class TrackFusionService
     private readonly ByteTrackTracker _tracker;
     private readonly ILogger<TrackFusionService> _logger;
 
+    /// <summary>
+    /// 初始化 Track 四维特征融合服务
+    /// </summary>
+    /// <param name="reid">ReID 特征提取器</param>
+    /// <param name="pose">姿态估计器</param>
+    /// <param name="tracker">ByteTrack 跟踪器</param>
+    /// <param name="logger">日志记录器</param>
     public TrackFusionService(
         ReIdExtractor reid,
         PoseEstimator pose,
@@ -38,6 +45,7 @@ public sealed class TrackFusionService
     /// </summary>
     /// <param name="trackId">ByteTrack Track ID</param>
     /// <param name="frames">该 Track 内所有帧的 (原图, bbox, 检测置信度)</param>
+    /// <param name="centers">轨迹中心点序列（可选，用于步态特征）</param>
     /// <returns>质量加权融合后的四维特征包</returns>
     public TrackFeaturePack FuseTrack(
         int trackId,

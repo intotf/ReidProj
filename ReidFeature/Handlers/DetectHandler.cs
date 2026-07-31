@@ -57,12 +57,6 @@ public static class DetectHandler
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        if (request.ContentLength == null || request.ContentLength == 0)
-        {
-            Log.RequestBodyEmpty(logger);
-            return [];
-        }
-
         var enumerable = VideoDecoder.DecodeFramesAsync(request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
         await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
 
