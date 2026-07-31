@@ -8,6 +8,7 @@ namespace ReidFeature
     [JsonSerializable(typeof(PersonRecognition))]
     [JsonSerializable(typeof(EnrollResult))]
     [JsonSerializable(typeof(MemberInfo[]))]
+    [JsonSerializable(typeof(double))]
     [JsonSerializable(typeof(FamilyGalleryService.GalleryData))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {

@@ -18,7 +18,7 @@ public static class DetectHandler
         HttpContext context,
         DetectService detectService,
         ILogger<Program> logger,
-        int frameIntervalSeconds = 5,
+        double frameIntervalSeconds = 5,
         CancellationToken cancellationToken = default)
     {
         return await HandleVideoAsync(context.Request, detectService, VideoCodec.H264, frameIntervalSeconds, logger, cancellationToken);
@@ -31,7 +31,7 @@ public static class DetectHandler
         HttpContext context,
         DetectService detectService,
         ILogger<Program> logger,
-        int frameIntervalSeconds = 5,
+        double frameIntervalSeconds = 5,
         CancellationToken cancellationToken = default)
     {
         return await HandleVideoAsync(context.Request, detectService, VideoCodec.H265, frameIntervalSeconds, logger, cancellationToken);
@@ -41,7 +41,7 @@ public static class DetectHandler
         HttpRequest request,
         DetectService detectService,
         VideoCodec codec,
-        int frameIntervalSeconds,
+        double frameIntervalSeconds,
         ILogger logger,
         CancellationToken cancellationToken)
     {

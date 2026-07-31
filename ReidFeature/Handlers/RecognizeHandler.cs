@@ -32,7 +32,7 @@ namespace ReidFeature.Handlers
             DetectService detectService,
             ILogger<Program> logger,
             string groupId,
-            int frameIntervalSeconds = 5,
+            double frameIntervalSeconds = 5,
             CancellationToken cancellationToken = default)
         {
             return await RecognizeVideoAsync(
@@ -49,7 +49,7 @@ namespace ReidFeature.Handlers
             DetectService detectService,
             ILogger<Program> logger,
             string groupId,
-            int frameIntervalSeconds = 5,
+            double frameIntervalSeconds = 5,
             CancellationToken cancellationToken = default)
         {
             return await RecognizeVideoAsync(
@@ -64,20 +64,20 @@ namespace ReidFeature.Handlers
             ILogger<Program> logger,
             string groupId,
             VideoCodec codec,
-            int frameIntervalSeconds,
+            double frameIntervalSeconds,
             CancellationToken cancellationToken)
         {
             if (request.ContentLength == null || request.ContentLength == 0)
             {
                 Log.RequestBodyEmpty(logger);
-                return new PersonRecognition("", groupId, "stranger", 0f, 0f);
+                return new PersonRecognition("", groupId, "stranger", 0f);
             }
 
             // 1. 获取 Gallery 成员
             var members = await familyProvider.GetMembersAsync(groupId, cancellationToken);
             if (members.Length == 0)
             {
-                return new PersonRecognition("", groupId, "stranger", 0f, 0f);
+                return new PersonRecognition("", groupId, "stranger", 0f);
             }
 
             // 2. 解码视频流，逐帧处理
@@ -100,7 +100,7 @@ namespace ReidFeature.Handlers
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     Log.VideoDecodeFailed(logger, ex);
-                    return new PersonRecognition("", groupId, "stranger", 0f, 0f);
+                    return new PersonRecognition("", groupId, "stranger", 0f);
                 }
 
                 using (image)
@@ -149,11 +149,11 @@ namespace ReidFeature.Handlers
             {
                 Log.RecognitionResult(logger, bestPerson.Name, bestScore, 0);
                 return new PersonRecognition(
-                    bestPerson.Id, groupId, bestPerson.Name, bestScore, 0f);
+                    bestPerson.Id, groupId, bestPerson.Name, bestScore);
             }
 
             Log.RecognitionResult(logger, "stranger", bestScore, 0);
-            return new PersonRecognition("", groupId, "stranger", bestScore, 0f);
+            return new PersonRecognition("", groupId, "stranger", bestScore);
         }
     }
 }

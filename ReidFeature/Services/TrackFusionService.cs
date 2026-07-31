@@ -94,14 +94,19 @@ public sealed class TrackFusionService
         });
 
         // 按权重融合特征向量（加权逐元素平均 + L2 归一化）
-        byte[] fusedCloth = WeightedAverageFeatures(clothFeatures, topIndices.Select(i => weights[i]).ToArray(), totalWeight);
-        byte[] fusedHead = WeightedAverageFeatures(headFeatures, topIndices.Select(i => weights[i]).ToArray(), totalWeight);
+        // Top-K ≤ 5，栈上分配权重数组，避免为每个特征重复 ToArray
+        Span<float> topWeights = stackalloc float[topK];
+        for (int i = 0; i < topK; i++)
+            topWeights[i] = weights[topIndices[i]];
+
+        byte[] fusedCloth = WeightedAverageFeatures(clothFeatures, topWeights, totalWeight);
+        byte[] fusedHead = WeightedAverageFeatures(headFeatures, topWeights, totalWeight);
 
         // 体型标量：加权平均
         float[] fusedBody = new float[2];
         for (int i = 0; i < topK; i++)
         {
-            float w = weights[topIndices[i]] / totalWeight;
+            float w = topWeights[i] / totalWeight;
             if (bodySignals[i].Length >= 2)
             {
                 fusedBody[0] += bodySignals[i][0] * w;
@@ -129,7 +134,7 @@ public sealed class TrackFusionService
     /// <summary>
     /// 加权融合特征向量 — 逐元素加权平均后 L2 归一化
     /// </summary>
-    private static byte[] WeightedAverageFeatures(byte[][] features, float[] weights, float totalWeight)
+    private static byte[] WeightedAverageFeatures(byte[][] features, ReadOnlySpan<float> weights, float totalWeight)
     {
         if (features.Length == 0 || features[0].Length == 0)
             return [];

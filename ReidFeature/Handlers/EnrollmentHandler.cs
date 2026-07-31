@@ -22,7 +22,7 @@ public static class EnrollmentHandler
         ILogger<Program> logger,
         string groupId,
         string memberName,
-        int frameIntervalSeconds = 0,
+        double frameIntervalSeconds = 0,
         CancellationToken cancellationToken = default)
     {
         return await EnrollVideoAsync(
@@ -40,7 +40,7 @@ public static class EnrollmentHandler
         ILogger<Program> logger,
         string groupId,
         string memberName,
-        int frameIntervalSeconds = 0,
+        double frameIntervalSeconds = 0,
         CancellationToken cancellationToken = default)
     {
         return await EnrollVideoAsync(
@@ -56,7 +56,7 @@ public static class EnrollmentHandler
         string groupId,
         string memberName,
         VideoCodec codec,
-        int frameIntervalSeconds,
+        double frameIntervalSeconds,
         CancellationToken cancellationToken)
     {
         var request = context.Request;

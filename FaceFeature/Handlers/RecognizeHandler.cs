@@ -64,7 +64,7 @@ namespace FaceFeature.Handlers
             DetectService detectService,
             ILogger<Program> logger,
             string groupId,
-            int frameIntervalSeconds = 5,
+            double frameIntervalSeconds = 5,
             float similarityThreshold = SimilarityThreshold,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
@@ -86,7 +86,7 @@ namespace FaceFeature.Handlers
             DetectService detectService,
             ILogger<Program> logger,
             string groupId,
-            int frameIntervalSeconds = 5,
+            double frameIntervalSeconds = 5,
             float similarityThreshold = SimilarityThreshold,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {

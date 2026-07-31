@@ -100,31 +100,5 @@ public sealed class DetectService
 
         _trackFrames.Clear();
         return results;
-    }
-
-    /// <summary>
-    /// 直接处理单张图像中的所有人（非视频流模式）
-    /// 注意：请勿与 ProcessVideoFrame 混用
-    /// </summary>
-    public List<PersonDetection> DetectPersons(Image<Rgb24> image)
-    {
-        var detections = _yolo.DetectPersons(image);
-        var results = new List<PersonDetection>();
-
-        for (int i = 0; i < detections.Count; i++)
-        {
-            var (box, conf) = detections[i];
-
-            var boundingBox = new BoundingBox(box.X, box.Y, box.Width, box.Height);
-
-            results.Add(new PersonDetection(
-                FrameIndex: 0,
-                Bbox: boundingBox,
-                Confidence: conf,
-                Features: [],
-                FeaturePack: null));
-        }
-
-        return results;
-    }
+    } 
 }

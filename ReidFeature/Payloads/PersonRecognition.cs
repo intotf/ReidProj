@@ -7,8 +7,7 @@
     /// <param name="GroupId">所在分组 ID</param>
     /// <param name="Name">人物名称（stranger 时为 "stranger"）</param>
     /// <param name="Score">四维融合相似度分数</param>
-    /// <param name="ReidSimilarity">人物特征相似度（保留兼容）</param>
-    public sealed record class PersonRecognition(string Id, string GroupId, string Name, float Score, float ReidSimilarity);
+    public sealed record class PersonRecognition(string Id, string GroupId, string Name, float Score);
 
     /// <summary>
     /// 注册结果
