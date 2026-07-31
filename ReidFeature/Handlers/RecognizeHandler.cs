@@ -20,6 +20,18 @@ namespace ReidFeature.Handlers
         /// <summary>
         /// 处理 H264 视频流识别 — 收集所有帧后四维融合匹配，只返回最佳结果
         /// </summary>
+        /// <param name="familyProvider">家庭成员提供者（Gallery 数据源）</param>
+        /// <param name="context">HTTP 上下文</param>
+        /// <param name="detectService">检测编排服务</param>
+        /// <param name="logger">日志记录器</param>
+        /// <param name="groupId">分组 ID</param>
+        /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
+        /// <param name="wCloth">全身 ReID 权重（默认 0.20）</param>
+        /// <param name="wHead">头肩 ReID 权重（默认 0.30）</param>
+        /// <param name="wBody">体型标量权重（默认 0.30）</param>
+        /// <param name="wGait">步态标量权重（默认 0.20）</param>
+        /// <param name="cancellationToken">取消令牌</param>
+        /// <returns>最佳匹配的人物识别结果；请求体为空、Gallery 无成员或视频解码失败时返回 null</returns>
         public static async Task<PersonRecognition?> HandleH264StreamAsync(
             IFamilyMemberProvider familyProvider,
             HttpContext context,
@@ -42,6 +54,18 @@ namespace ReidFeature.Handlers
         /// <summary>
         /// 处理 H265 视频流识别 — 收集所有帧后四维融合匹配，只返回最佳结果
         /// </summary>
+        /// <param name="familyProvider">家庭成员提供者（Gallery 数据源）</param>
+        /// <param name="context">HTTP 上下文</param>
+        /// <param name="detectService">检测编排服务</param>
+        /// <param name="logger">日志记录器</param>
+        /// <param name="groupId">分组 ID</param>
+        /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
+        /// <param name="wCloth">全身 ReID 权重（默认 0.20）</param>
+        /// <param name="wHead">头肩 ReID 权重（默认 0.30）</param>
+        /// <param name="wBody">体型标量权重（默认 0.30）</param>
+        /// <param name="wGait">步态标量权重（默认 0.20）</param>
+        /// <param name="cancellationToken">取消令牌</param>
+        /// <returns>最佳匹配的人物识别结果；请求体为空、Gallery 无成员或视频解码失败时返回 null</returns>
         public static async Task<PersonRecognition?> HandleH265StreamAsync(
             IFamilyMemberProvider familyProvider,
             HttpContext context,

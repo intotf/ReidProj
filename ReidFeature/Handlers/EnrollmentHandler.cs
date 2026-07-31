@@ -15,6 +15,15 @@ public static class EnrollmentHandler
     /// <summary>
     /// 处理 H264 视频流注册
     /// </summary>
+    /// <param name="familyProvider">家庭成员提供者（Gallery 数据源）</param>
+    /// <param name="context">HTTP 上下文</param>
+    /// <param name="detectService">检测编排服务</param>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="groupId">分组 ID</param>
+    /// <param name="memberName">成员名称</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>注册结果（成员 ID、名称、分组）；请求体为空、memberName 为空、未检测到人物或特征提取失败时返回 BadRequest</returns>
     public static async Task<IResult> HandleH264EnrollAsync(
         IFamilyMemberProvider familyProvider,
         HttpContext context,
@@ -33,6 +42,15 @@ public static class EnrollmentHandler
     /// <summary>
     /// 处理 H265 视频流注册
     /// </summary>
+    /// <param name="familyProvider">家庭成员提供者（Gallery 数据源）</param>
+    /// <param name="context">HTTP 上下文</param>
+    /// <param name="detectService">检测编排服务</param>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="groupId">分组 ID</param>
+    /// <param name="memberName">成员名称</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>注册结果（成员 ID、名称、分组）；请求体为空、memberName 为空、未检测到人物或特征提取失败时返回 BadRequest</returns>
     public static async Task<IResult> HandleH265EnrollAsync(
         IFamilyMemberProvider familyProvider,
         HttpContext context,

@@ -14,6 +14,12 @@ public static class DetectHandler
     /// <summary>
     /// 处理 H264 视频流检测请求
     /// </summary>
+    /// <param name="context">HTTP 上下文</param>
+    /// <param name="detectService">检测编排服务</param>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>检测到的人物列表（含四维特征包）；请求体为空或视频解码失败时返回空列表</returns>
     public static async Task<List<PersonDetection>> HandleH264StreamAsync(
         HttpContext context,
         DetectService detectService,
@@ -27,6 +33,12 @@ public static class DetectHandler
     /// <summary>
     /// 处理 H265 视频流检测请求
     /// </summary>
+    /// <param name="context">HTTP 上下文</param>
+    /// <param name="detectService">检测编排服务</param>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>检测到的人物列表（含四维特征包）；请求体为空或视频解码失败时返回空列表</returns>
     public static async Task<List<PersonDetection>> HandleH265StreamAsync(
         HttpContext context,
         DetectService detectService,
