@@ -119,8 +119,12 @@ static class VideoDecoder
 
         if (frameIntervalSeconds > 0)
         {
-            startInfo.ArgumentList.Add("-r");
-            startInfo.ArgumentList.Add((1d / frameIntervalSeconds).ToString("F6"));
+            double rate = 1d / frameIntervalSeconds;
+            if (double.IsFinite(rate) && rate > 0)
+            {
+                startInfo.ArgumentList.Add("-r");
+                startInfo.ArgumentList.Add(rate.ToString("F6"));
+            }
         }
 
         startInfo.ArgumentList.Add("-y");

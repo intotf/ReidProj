@@ -97,6 +97,13 @@ namespace ReidFeature.Handlers
             float wGait,
             CancellationToken cancellationToken)
         {
+            // 防御无效参数：NaN/±Infinity 统一按 0（解码全部帧）处理，并 clamp 到合理上限
+            if (double.IsNaN(frameIntervalSeconds) || double.IsInfinity(frameIntervalSeconds))
+            {
+                frameIntervalSeconds = 0;
+            }
+            frameIntervalSeconds = Math.Clamp(frameIntervalSeconds, 0, 3600);
+
             // 1. 获取 Gallery 成员
             var members = await familyProvider.GetMembersAsync(groupId, cancellationToken);
             if (members.Length == 0)

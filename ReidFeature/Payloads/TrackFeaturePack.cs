@@ -103,6 +103,15 @@ public sealed class TrackFeaturePack
             return 0f;
         }
 
+        // 任一向量为零向量（如关键点缺失导致的 [0,0]）时无法衡量相似度，
+        // 返回 0 而非 1，避免该维度被虚高为满分
+        float normA = TensorPrimitives.Norm(a);
+        float normB = TensorPrimitives.Norm(b);
+        if (normA == 0f || normB == 0f)
+        {
+            return 0f;
+        }
+
         // 逆距离映射到 [0, 1]，dist=0 → 1.0, dist=1 → 0.5, dist→∞ → 0
         return 1f / (1f + TensorPrimitives.Distance(a, b));
     }

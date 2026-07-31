@@ -10,7 +10,7 @@ namespace ReidFeature.Services;
 /// <summary>
 /// 检测编排服务：YOLO 人物检测 → ByteTrack 跟踪 → TrackFusion 四维特征融合
 /// </summary>
-public sealed class DetectService
+public sealed class DetectService : IDisposable
 {
     private readonly YoloDetector _yolo;
     private readonly ByteTrackTracker _tracker;
@@ -115,8 +115,13 @@ public sealed class DetectService
             }
             catch (Exception ex)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    DisposeAllTrackFrames();
+                    throw;
+                }
                 Log.VideoDecodeFailed(logger, ex);
+                DisposeAllTrackFrames();
                 return false;
             }
 
@@ -173,4 +178,29 @@ public sealed class DetectService
         _trackFrames.Clear();
         return results;
     } 
+
+    /// <summary>
+    /// 释放全部 Track 的缓存裁剪图（解码失败 / 请求取消时调用，避免 Image 非托管内存泄漏）
+    /// </summary>
+    private void DisposeAllTrackFrames()
+    {
+        foreach (var frames in _trackFrames.Values)
+        {
+            foreach (var (frame, _, _) in frames)
+            {
+                frame.Dispose();
+            }
+        }
+        _trackFrames.Clear();
+    }
+
+    /// <summary>
+    /// 请求结束时的最终兜底：释放尚未清空的缓存裁剪图
+    /// 正常路径已在 FlushCompletedTracks / 解码失败路径中释放，此处仅防御异常传播等未覆盖路径
+    /// 注：注入的 YoloDetector / TrackFusionService 为 Singleton，生命周期由 DI 容器管理，不在此释放
+    /// </summary>
+    public void Dispose()
+    {
+        DisposeAllTrackFrames();
+    }
 }

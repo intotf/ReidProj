@@ -55,6 +55,13 @@ public static class DetectHandler
         ILogger logger,
         CancellationToken cancellationToken)
     {
+        // 防御无效参数：NaN/±Infinity 统一按 0（解码全部帧）处理，并 clamp 到合理上限
+        if (double.IsNaN(frameIntervalSeconds) || double.IsInfinity(frameIntervalSeconds))
+        {
+            frameIntervalSeconds = 0;
+        }
+        frameIntervalSeconds = Math.Clamp(frameIntervalSeconds, 0, 3600);
+
         // 解码 → 逐帧检测/跟踪/缓存（统一由 DetectService 处理）
         if (!await detectService.ProcessVideoStreamAsync(request, codec, logger, frameIntervalSeconds, cancellationToken))
         {
