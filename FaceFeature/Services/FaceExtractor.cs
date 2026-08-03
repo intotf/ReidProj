@@ -14,7 +14,7 @@ using System.Numerics.Tensors;
 namespace FaceFeature.Services;
 
 /// <summary>
-/// ArcFace w600k_r50 ONNX 人脸特征提取器 — 来自 InsightFace buffalo_l 模型包
+/// ArcFace ONNX 人脸特征提取器 — 模型文件名通过 Onnx:FaceRecognitionModelName 配置（默认 glintr100.onnx）
 /// 输入 RGB 人脸裁剪图，输出 512 维 L2 归一化特征向量
 /// </summary>
 public sealed class FaceExtractor : IDisposable
@@ -44,19 +44,22 @@ public sealed class FaceExtractor : IDisposable
     /// </summary>
     /// <param name="logger">日志记录器</param>
     /// <param name="onnxOptions">ONNX Runtime 会话配置</param>
-    /// <exception cref="FileNotFoundException">models/w600k_r50.onnx 未找到时抛出</exception>
+    /// <exception cref="FileNotFoundException">models 下配置的特征模型未找到时抛出</exception>
     public FaceExtractor(ILogger<FaceExtractor> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
 
-        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "w600k_r50.onnx");
+        var modelName = string.IsNullOrWhiteSpace(onnxOptions.Value.FaceRecognitionModelName)
+            ? "glintr100.onnx"
+            : onnxOptions.Value.FaceRecognitionModelName;
+        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", modelName);
         if (!File.Exists(modelPath))
         {
-            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "w600k_r50.onnx");
+            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", modelName);
         }
         if (!File.Exists(modelPath))
         {
-            throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出人脸特征模型", modelPath);
+            throw new FileNotFoundException($"请先运行 scripts/setup_models.py 导出人脸特征模型 models/{modelName}", modelPath);
         }
 
         _session = new InferenceSession(modelPath, onnxOptions.Value.FaceRec);

@@ -19,7 +19,7 @@
 | ASP.NET Core Minimal API | .NET 10，`WebApplication.CreateSlimBuilder` |
 | Microsoft.ML.OnnxRuntime 1.27.1 | ONNX 推理 |
 | SCRFD-10g | 人脸检测模型（`det_10g.onnx`） |
-| ArcFace w600k_r50 | 人脸特征提取模型（`w600k_r50.onnx`） |
+| ArcFace R100（glint360k） | 人脸特征提取模型（`glintr100.onnx`，可配置切换） |
 | SixLabors.ImageSharp 4.x | 图像解码 / 对齐 / 缩放 |
 | ffmpeg | H264/H265 裸流 → BMP 帧流式解码 |
 | System.Numerics.Tensors | 特征融合与余弦相似度计算 |
@@ -71,7 +71,7 @@ python scripts/setup_models.py
 脚本自动从 [InsightFace buffalo_l](https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip) 提取并输出：
 
 - `models/det_10g.onnx` — SCRFD-10g 人脸检测
-- `models/w600k_r50.onnx` — ArcFace 特征提取
+- `models/glintr100.onnx` — ArcFace 特征提取（默认；如需切换旧模型，保留 `models/w600k_r50.onnx` 并在 `Onnx:FaceRecognitionModelName` 中指定文件名）
 
 也可以手动放置模型到 `models/` 目录。
 
