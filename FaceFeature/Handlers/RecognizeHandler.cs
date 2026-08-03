@@ -73,12 +73,6 @@ namespace FaceFeature.Handlers
             CancellationToken cancellationToken)
         {
             var persons = await faceGroupService.GetPersonsAsync(groupId, cancellationToken);
-            if (request.ContentLength == null || request.ContentLength == 0)
-            {
-                Log.RequestBodyEmpty(logger);
-                return null;
-            }
-
             var frames = detectService.DetectFramesAsync(request.Body, codec, frameIntervalSeconds, cancellationToken);
 
             var fused = await FaceVideoFusion.FuseAsync(

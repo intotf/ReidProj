@@ -26,12 +26,6 @@ public static class DetectHandler
         int fusionFrames = 30,
         CancellationToken cancellationToken = default)
     {
-        if (context.Request.ContentLength == null || context.Request.ContentLength == 0)
-        {
-            Log.RequestBodyEmpty(logger);
-            return null;
-        }
-
         var frames = detectService.DetectFramesAsync(context.Request.Body, VideoCodec.H264, frameIntervalSeconds, cancellationToken);
         var fused = await FaceVideoFusion.FuseAsync(frames, fusionFrames > 0 ? fusionFrames : int.MaxValue, cancellationToken);
         if (fused is null)
@@ -59,12 +53,6 @@ public static class DetectHandler
         int fusionFrames = 30,
         CancellationToken cancellationToken = default)
     {
-        if (context.Request.ContentLength == null || context.Request.ContentLength == 0)
-        {
-            Log.RequestBodyEmpty(logger);
-            return null;
-        }
-
         var frames = detectService.DetectFramesAsync(context.Request.Body, VideoCodec.H265, frameIntervalSeconds, cancellationToken);
         var fused = await FaceVideoFusion.FuseAsync(frames, fusionFrames > 0 ? fusionFrames : int.MaxValue, cancellationToken);
         if (fused is null)
