@@ -1,4 +1,5 @@
 using FaceFeature.Helpers;
+using FaceFeature.Payloads;
 using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -11,8 +12,9 @@ using System.Diagnostics;
 namespace FaceFeature.Services;
 
 /// <summary>
-/// SCRFD-10g ONNX 人脸检测器 — 基于 InsightFace buffalo_l 模型包，支持多级 anchor 解码与 NMS。
-/// 输入 RGB 图像，输出检测到的人脸边界框列表（坐标相对于原图）。
+/// SCRFD-10g ONNX 人脸检测器 — 基于 InsightFace buffalo_l 模型包（det_10g.onnx）。
+/// 固定模型布局：3 层 FPN（stride 8/16/32）、每像素 2 anchor、channels-last、5 关键点。
+/// 输入 RGB 图像，输出检测到的人脸边界框与关键点（坐标相对于原图）。
 /// </summary>
 public sealed class FaceDetector : IDisposable
 {
@@ -43,14 +45,14 @@ public sealed class FaceDetector : IDisposable
     private readonly InferenceSession _session;
 
 
-    /// <summary>特征金字塔的层数（3 或 5），由模型输出的张量数量决定</summary>
-    private readonly int _fmc;
+    /// <summary>特征金字塔的层数（det_10g 固定 3 层）</summary>
+    private const int Fmc = 3;
 
-    /// <summary>每像素锚点数（2 或 1），由模型输出的张量数量决定</summary>
-    private readonly int _numAnchors;
+    /// <summary>每像素锚点数（det_10g 固定 2）</summary>
+    private const int NumAnchors = 2;
 
-    /// <summary>各特征图的下采样步长（如 [8, 16, 32]）</summary>
-    private readonly int[] _strides;
+    /// <summary>各特征图的下采样步长（det_10g 固定 [8, 16, 32]）</summary>
+    private static readonly int[] Strides = [8, 16, 32];
 
     /// <summary>
     /// 初始化 SCRFD 人脸检测器
@@ -71,19 +73,13 @@ public sealed class FaceDetector : IDisposable
 
         _session = new InferenceSession(modelPath, onnxOptions.Value.Face);
 
-        // 根据输出张量数量自动推断模型布局
-        //   6 输出 → 3 层 + 无关键点，每像素 2 锚点（scrfd_10g）
-        //   9 输出 → 3 层 + 5 关键点，每像素 2 锚点
-        //  10 输出 → 5 层 + 无关键点，每像素 1 锚点
-        //  15 输出 → 5 层 + 5 关键点，每像素 1 锚点
-        (_fmc, _strides, _numAnchors) = _session.OutputMetadata.Count switch
+        // det_10g（buffalo_l）固定布局：9 个输出（3 层 score / bbox / 5 关键点），channels-last。
+        // 更换模型时需同步调整 Fmc / NumAnchors / Strides 与解码逻辑。
+        if (_session.OutputMetadata.Count != 9)
         {
-            6 => (3, new[] { 8, 16, 32 }, 2),
-            9 => (3, [8, 16, 32], 2),
-            10 => (5, [8, 16, 32, 64, 128], 1),
-            15 => (5, [8, 16, 32, 64, 128], 1),
-            _ => throw new InvalidOperationException($"不支持的 SCRFD 输出数量: {_session.OutputMetadata.Count}")
-        };
+            throw new InvalidOperationException(
+                $"FaceDetector 仅支持 det_10g 固定布局（9 个输出），当前模型输出数: {_session.OutputMetadata.Count}");
+        }
     }
 
     /// <summary>
@@ -91,7 +87,7 @@ public sealed class FaceDetector : IDisposable
     /// </summary>
     /// <param name="image">输入 RGB 图像</param>
     /// <returns>人脸边界框列表（坐标相对于原图），无人脸时返回空列表</returns>
-    private List<(Rectangle Bbox, float Confidence)> DetectAll(Image<Rgb24> image)
+    private List<FaceBox> DetectAll(Image<Rgb24> image)
     {
         var sw = Stopwatch.StartNew();
 
@@ -110,7 +106,7 @@ public sealed class FaceDetector : IDisposable
         float[] buffer = ArrayPool<float>.Shared.Rent(tensorSize);
         try
         {
-            FillTensor(canvas, buffer);
+            FillTensor(canvas, buffer.AsMemory(0, tensorSize));
 
             var inputName = _session.InputMetadata.Keys.First();
             var input = NamedOnnxValue.CreateFromTensor(inputName,
@@ -118,18 +114,16 @@ public sealed class FaceDetector : IDisposable
 
             using var results = _session.Run([input]);
 
-            bool bboxChannelsFirst = IsChannelsFirst(results[_fmc]);
-
             var candidates = new List<Candidate>(capacity: 200);
-            for (int level = 0; level < _fmc; level++)
+            for (int level = 0; level < Fmc; level++)
             {
-                int stride = _strides[level];
+                int stride = Strides[level];
                 int fmSize = InputSize / stride;
                 DecodeLevel(
                     ((DenseTensor<float>)results[level].AsTensor<float>()).Buffer.Span,
-                    ((DenseTensor<float>)results[_fmc + level].AsTensor<float>()).Buffer.Span,
-                    stride, _numAnchors, fmSize,
-                    bboxChannelsFirst,
+                    ((DenseTensor<float>)results[Fmc + level].AsTensor<float>()).Buffer.Span,
+                    ((DenseTensor<float>)results[2 * Fmc + level].AsTensor<float>()).Buffer.Span,
+                    stride, NumAnchors, fmSize,
                     scale, padX, padY, image.Width, image.Height,
                     candidates);
             }
@@ -150,15 +144,14 @@ public sealed class FaceDetector : IDisposable
     /// 检测图像中面积最大且置信度超过阈值的最佳人脸（性能优先——避免全量特征提取）
     /// </summary>
     /// <param name="image">输入 RGB 图像</param>
-    /// <returns>面积最大的单人脸，无人脸时返回 null</returns>
-    public (Rectangle Bbox, float Confidence)? DetectBest(Image<Rgb24> image)
+    /// <returns>面积最大的单人脸（含关键点），无人脸时返回 null</returns>
+    public FaceBox? DetectBest(Image<Rgb24> image)
     {
         var detections = DetectAll(image);
         if (detections.Count == 0)
             return null;
 
-        // 选取面积最大的人脸（置信度已由 Detect 内部过滤）
-        (Rectangle Bbox, float Confidence) best = default;
+        FaceBox? best = null;
         int bestArea = -1;
         foreach (var d in detections)
         {
@@ -186,8 +179,8 @@ public sealed class FaceDetector : IDisposable
     /// 输出为 CHW 连续内存布局，三个平面依次为 R→G→B 通道。
     /// </remarks>
     /// <param name="image">640×640 的 letterbox 图像</param>
-    /// <param name="dest">预分配的 float 数组，长度至少 3×640×640</param>
-    private static void FillTensor(Image<Rgb24> image, float[] dest)
+    /// <param name="dest">目标缓冲区，长度至少 3×640×640</param>
+    private static void FillTensor(Image<Rgb24> image, Memory<float> dest)
     {
         int h = image.Height, w = image.Width;
         int planeSize = h * w;
@@ -197,33 +190,17 @@ public sealed class FaceDetector : IDisposable
             {
                 var row = acc.GetRowSpan(y);
                 int rowOff = y * w;
+                var destSpan = dest.Span;
                 for (int x = 0; x < w; x++)
                 {
                     var p = row[x];
                     int i = rowOff + x;
-                    dest[i] = (p.R - ScrfdMean) / ScrfdStd;
-                    dest[planeSize + i] = (p.G - ScrfdMean) / ScrfdStd;
-                    dest[2 * planeSize + i] = (p.B - ScrfdMean) / ScrfdStd;
+                    destSpan[i] = (p.R - ScrfdMean) / ScrfdStd;
+                    destSpan[planeSize + i] = (p.G - ScrfdMean) / ScrfdStd;
+                    destSpan[2 * planeSize + i] = (p.B - ScrfdMean) / ScrfdStd;
                 }
             }
         });
-    }
-
-    /// <summary>
-    /// 检测 bbox 输出张量的布局：channels-first ([4, N] / [1, 4, N]) 或 channels-last ([N, 4] / [1, N, 4])
-    /// </summary>
-    /// <remarks>
-    /// 通过判断倒数第二维是否为 4 来区分两种布局：
-    ///   dims[^2] == 4 → channels-first（常见的 ONNX 转出格式）
-    ///   否则 → channels-last（常见的 PyTorch 转出格式）
-    /// </remarks>
-    /// <param name="bboxOutput">bbox 输出节点</param>
-    /// <returns>true 表示 channels-first，false 表示 channels-last</returns>
-    private static bool IsChannelsFirst(NamedOnnxValue bboxOutput)
-    {
-        var tensor = (DenseTensor<float>)bboxOutput.AsTensor<float>();
-        var dims = tensor.Dimensions;
-        return dims.Length >= 2 && dims[^2] == 4;
     }
 
     /// <summary>
@@ -233,15 +210,16 @@ public sealed class FaceDetector : IDisposable
     /// Anchor 点定义在特征图 cell 的左上角 (x * stride, y * stride)，与 InsightFace 官方实现一致。
     /// 张量采用空间优先（spatial-major）布局：索引 = pixelIdx * numAnchors + anchorIdx，
     /// 即同一像素位置上不同 anchor 的数据连续排列。
+    /// bbox 为 channels-last [N, 4]，关键点为 channels-last [N, 10]（det_10g 固定布局）。
     /// 
     /// 反向映射到原图坐标：(anchor - left/top - pad) / scale，再 clamp 到图像范围。
     /// </remarks>
     /// <param name="scores">置信度张量扁平化 span</param>
     /// <param name="bboxes">边界框回归值张量扁平化 span</param>
+    /// <param name="kpss">关键点回归值张量扁平化 span（每锚点 10 个值 = 5 点 × 2 坐标）</param>
     /// <param name="stride">当前特征图的下采样步长</param>
     /// <param name="numAnchors">每像素锚点数</param>
     /// <param name="fmSize">特征图边长（fmSize × fmSize）</param>
-    /// <param name="bboxChannelsFirst">bbox 是否为 channels-first 布局</param>
     /// <param name="scale">letterbox 缩放比例</param>
     /// <param name="padX">letterbox 水平填充量</param>
     /// <param name="padY">letterbox 垂直填充量</param>
@@ -249,9 +227,8 @@ public sealed class FaceDetector : IDisposable
     /// <param name="imgH">原图高度</param>
     /// <param name="candidates">候选框输出列表</param>
     private static void DecodeLevel(
-        ReadOnlySpan<float> scores, ReadOnlySpan<float> bboxes,
+        ReadOnlySpan<float> scores, ReadOnlySpan<float> bboxes, ReadOnlySpan<float> kpss,
         int stride, int numAnchors, int fmSize,
-        bool bboxChannelsFirst,
         float scale, float padX, float padY,
         int imgW, int imgH,
         List<Candidate> candidates)
@@ -271,24 +248,12 @@ public sealed class FaceDetector : IDisposable
             float anchorX = cx * stride;
             float anchorY = cy * stride;
 
-            float left, top, right, bottom;
-            if (bboxChannelsFirst)
-            {
-                // channels-first [4, total]：同一通道的所有锚点数据连续
-                left = bboxes[i + 0 * total] * stride;
-                top = bboxes[i + 1 * total] * stride;
-                right = bboxes[i + 2 * total] * stride;
-                bottom = bboxes[i + 3 * total] * stride;
-            }
-            else
-            {
-                // channels-last [total, 4]：同一锚点的 4 个回归值连续
-                int off = i * 4;
-                left = bboxes[off] * stride;
-                top = bboxes[off + 1] * stride;
-                right = bboxes[off + 2] * stride;
-                bottom = bboxes[off + 3] * stride;
-            }
+            // channels-last [total, 4]：同一锚点的 4 个回归值连续（det_10g 固定布局）
+            int off = i * 4;
+            float left = bboxes[off] * stride;
+            float top = bboxes[off + 1] * stride;
+            float right = bboxes[off + 2] * stride;
+            float bottom = bboxes[off + 3] * stride;
 
             float x1 = (anchorX - left - padX) / scale;
             float y1 = (anchorY - top - padY) / scale;
@@ -303,15 +268,25 @@ public sealed class FaceDetector : IDisposable
             float w = x2 - x1;
             float h = y2 - y1;
             if (w > 0 && h > 0)
-                candidates.Add(new Candidate(x1, y1, w, h, score));
+            {
+                var kps = new PointF[5];
+                int kpsOffset = i * 10;
+                for (int k = 0; k < 5; k++)
+                {
+                    float kx = (anchorX + kpss[kpsOffset + 2 * k] * stride - padX) / scale;
+                    float ky = (anchorY + kpss[kpsOffset + 2 * k + 1] * stride - padY) / scale;
+                    kps[k] = new PointF(Math.Clamp(kx, 0f, imgW), Math.Clamp(ky, 0f, imgH));
+                }
+                candidates.Add(new Candidate(x1, y1, w, h, score, kps));
+            }
         }
     }
 
     // ─── NMS ──────────────────────────────────────────────────
 
-    private static List<(Rectangle Bbox, float Confidence)> Nms(List<Candidate> cs)
+    private static List<FaceBox> Nms(List<Candidate> cs)
     {
-        var result = new List<(Rectangle, float)>();
+        var result = new List<FaceBox>();
         if (cs.Count == 0) return result;
 
         cs.Sort((a, b) => b.Score.CompareTo(a.Score));
@@ -323,7 +298,7 @@ public sealed class FaceDetector : IDisposable
         {
             if (suppressed[i]) continue;
             var c = cs[i];
-            result.Add((new Rectangle((int)c.X, (int)c.Y, (int)c.W, (int)c.H), c.Score));
+            result.Add(new FaceBox(new Rectangle((int)c.X, (int)c.Y, (int)c.W, (int)c.H), c.Score, c.Keypoints));
 
             float areaI = c.W * c.H;
             for (int j = i + 1; j < n; j++)
@@ -356,7 +331,8 @@ public sealed class FaceDetector : IDisposable
     /// <param name="W">宽度</param>
     /// <param name="H">高度</param>
     /// <param name="Score">人脸置信度</param>
-    private readonly record struct Candidate(float X, float Y, float W, float H, float Score)
+    /// <param name="Keypoints">5 个关键点（原图坐标）</param>
+    private readonly record struct Candidate(float X, float Y, float W, float H, float Score, PointF[] Keypoints)
         : IComparable<Candidate>
     {
         /// <summary>按置信度降序比较（用于 NMS 排序）</summary>

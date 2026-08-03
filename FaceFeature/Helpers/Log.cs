@@ -31,4 +31,19 @@ static partial class Log
 
     [LoggerMessage(Level = LogLevel.Information, Message = "人脸特征: dim={Dim}, 耗时 {Elapsed:F1}ms")]
     public static partial void FaceFeatureExtracted(ILogger logger, long dim, double elapsed);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "人脸五点对齐完成, 关键点={Kps}, 耗时 {Elapsed:F1}ms")]
+    public static partial void FaceAligned(ILogger logger, int kps, double elapsed);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "人脸清晰度: score={Score:F1}")]
+    public static partial void FaceSharpness(ILogger logger, float score);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "跳过模糊帧: sharpness={Score:F1} < threshold={Threshold:F1}")]
+    public static partial void FaceSkippedBlurry(ILogger logger, float score, float threshold);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "底库注册照质量偏低: {Name}, sharpness={Score:F1}")]
+    public static partial void FaceGalleryLowQuality(ILogger logger, string name, float score);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "人脸库存储错误: {Message}")]
+    public static partial void FaceStoreError(ILogger logger, string message, Exception? exception);
 }

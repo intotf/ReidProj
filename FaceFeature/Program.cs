@@ -19,6 +19,10 @@ namespace FaceFeature
             builder.Services.Configure<OnnxSessionOptions>(
                 builder.Configuration.GetSection("Onnx"));
 
+            // ── 清晰度筛选配置 ────────────────────────────
+            builder.Services.Configure<FaceQualityOptions>(
+                builder.Configuration.GetSection("FaceQuality"));
+
             // ── JSON 序列化 ──────────────────────────────
             builder.Services.ConfigureHttpJsonOptions(options =>
             {
@@ -35,7 +39,7 @@ namespace FaceFeature
             builder.Services.AddSingleton<FaceDetector>();
             builder.Services.AddSingleton<FaceExtractor>();
             builder.Services.AddSingleton<DetectService>();
-            builder.Services.AddSingleton<IFaceGroupProvider, MockFaceGroupProvider>();
+            builder.Services.AddSingleton<FaceGroupService>();
 
             builder.Services.AddHttpClient();
 
@@ -83,6 +87,20 @@ namespace FaceFeature
             app.MapPost("/recognize/h265stream/{groupId}", RecognizeHandler.HandleH265StreamAsync)
                .WithName("RecognizeH265Stream")
                .Accepts<byte[]>("application/octet-stream");
+
+            // ── 人脸管理 ──────────────────────────────────
+            app.MapPost("/faces/{groupId}/register", FaceGroupHandler.RegisterAsync)
+               .WithName("RegisterFace")
+               .Accepts<byte[]>("application/octet-stream");
+
+            app.MapGet("/faces/{groupId}", FaceGroupHandler.ListAsync)
+               .WithName("ListFaces");
+
+            app.MapGet("/faces/{groupId}/{faceId}", FaceGroupHandler.GetAsync)
+               .WithName("GetFace");
+
+            app.MapDelete("/faces/{groupId}/{faceId}", FaceGroupHandler.DeleteAsync)
+               .WithName("DeleteFace");
 
             app.Run();
         }

@@ -146,7 +146,7 @@ public static class DetectHandler
         {
             using (image)
             {
-                var item = detectService.DetectBestFace(image);
+                var item = detectService.DetectBestFace(image, skipBlurry: true);
                 if (item is not null)
                 {
                     yield return item;
