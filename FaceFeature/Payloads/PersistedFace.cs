@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace FaceFeature.Payloads;
 
 /// <summary>
@@ -15,6 +17,7 @@ internal sealed class PersistedFace
     public int BboxWidth { get; set; }
     public int BboxHeight { get; set; }
     public DateTime RegisteredAt { get; set; }
-    public byte[] FaceFeatures { get; set; } = [];
+    [JsonConverter(typeof(FloatArrayBase64Converter))]
+    public float[] FaceFeatures { get; set; } = [];
     public string ImageFile { get; set; } = string.Empty;
 }

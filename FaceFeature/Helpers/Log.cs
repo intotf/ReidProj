@@ -46,4 +46,7 @@ static partial class Log
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "人脸库存储错误: {Message}")]
     public static partial void FaceStoreError(ILogger logger, string message, Exception? exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "多帧融合完成: 使用 {Frames} 帧, 提前完成={Early}, 相似度={Score:F4}")]
+    public static partial void FaceFusionCompleted(ILogger logger, int frames, bool early, float score);
 }

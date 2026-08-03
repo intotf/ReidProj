@@ -19,7 +19,9 @@ public static class FaceGroupHandler
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
+        {
             return Results.BadRequest(new FaceError("缺少 name 参数"));
+        }
 
         FaceRegistrationResult result;
         try

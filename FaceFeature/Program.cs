@@ -58,13 +58,6 @@ namespace FaceFeature
             app.Map("/", context => context.Response.WriteAsync("HealthCheck"))
                .WithName("HealthCheck");
 
-            app.MapPost("/detect/image", DetectHandler.HandleImageAsync)
-               .WithName("DetectImage")
-               .Accepts<byte[]>("application/octet-stream");
-
-            app.MapPost("/detect/imageurl", DetectHandler.HandleImageUrlAsync)
-               .WithName("DetectImageUrl");
-
             app.MapPost("/detect/h264stream", DetectHandler.HandleH264StreamAsync)
                .WithName("DetectH264Stream")
                .Accepts<byte[]>("application/octet-stream");
@@ -72,13 +65,6 @@ namespace FaceFeature
             app.MapPost("/detect/h265stream", DetectHandler.HandleH265StreamAsync)
                .WithName("DetectH265Stream")
                .Accepts<byte[]>("application/octet-stream");
-
-            app.MapPost("/recognize/image/{groupId}", RecognizeHandler.HandleImageAsync)
-               .WithName("RecognizeImage")
-               .Accepts<byte[]>("application/octet-stream");
-
-            app.MapPost("/recognize/imageurl/{groupId}", RecognizeHandler.HandleImageUrlAsync)
-               .WithName("RecognizeImageUrl");
 
             app.MapPost("/recognize/h264stream/{groupId}", RecognizeHandler.HandleH264StreamAsync)
                .WithName("RecognizeH264Stream")

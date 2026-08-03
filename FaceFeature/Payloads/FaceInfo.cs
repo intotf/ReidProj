@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace FaceFeature.Payloads;
 
 /// <summary>
@@ -19,4 +21,4 @@ public sealed record FaceInfo(
     float Sharpness,
     BoundingBox Bbox,
     DateTime RegisteredAt,
-    byte[]? Features = null);
+    [property: JsonConverter(typeof(FloatArrayBase64Converter))] float[]? Features = null);

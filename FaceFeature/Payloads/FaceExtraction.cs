@@ -1,7 +1,7 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
-namespace FaceFeature.Services;
+namespace FaceFeature.Payloads;
 
 /// <summary>
 /// 对齐后的 112×112 人脸与清晰度分数（Aligned 由调用方负责释放）

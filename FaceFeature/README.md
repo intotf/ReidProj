@@ -1,17 +1,16 @@
 # FaceFeature — 门铃摄像头人脸识别服务器
 
-基于 **.NET 10** 与 **ONNX Runtime** 的人脸检测 / 识别服务器实现方案，面向门铃摄像头场景：接收图片或 H264/H265 视频裸流，实时检测人脸并与指定分组中的已知人物进行 1:N 比对识别。
+基于 **.NET 10** 与 **ONNX Runtime** 的人脸识别服务器，面向门铃摄像头场景：接收 H264 / H265 视频裸流，对整段视频做**多帧特征融合**后与指定分组中的已知人物进行 1:N 比对，一个视频输入只产出一个识别结果。
 
 ## 特性
 
-- 🔍 **人脸检测**：SCRFD-10g（`det_10g.onnx`），640×640 letterbox 推理，自动按输出张量数量适配模型布局，NMS 去重
-- 👤 **人脸特征提取**：ArcFace w600k_r50（`w600k_r50.onnx`，InsightFace buffalo_l 模型包），输出 512 维 L2 归一化特征向量
-- 🎯 **最佳人脸策略**：性能优先，仅对面积最大的单人脸做特征提取与比对
-- 📹 **视频裸流支持**：通过自带 ffmpeg pipe 流式解码 H264 / H265 裸流（Annex B），文件不落地，支持按帧间隔抽帧
-- 🏷️ **分组识别**：`datas/facegroups/{groupId}/{人名}/` 目录即注册表，启动时自动提取特征入库，实现 1:N 识别
-- 📡 **两种输入方式**：原始图片二进制上传 或 图片 URL 下载
-- ⚡ **性能优化**：`ArrayPool` 缓冲复用、ONNX 会话可独立配置线程数、AOT 发布（`PublishAot`）、源生成 JSON 序列化
-- 🐛 **调试辅助**：Debug 构建下自动将带红色人脸框的标注图写入 `out/` 目录
+- 🔍 **人脸检测**：SCRFD-10g（`det_10g.onnx`），640×640 letterbox 推理，固定模型布局（3 层 FPN、5 关键点），NMS 去重
+- 🎯 **五点对齐**：利用 SCRFD 关键点做 InsightFace 标准相似变换对齐到 112×112，替代简单裁剪缩放，显著提升同人相似度
+- 🔆 **清晰帧筛选**：对齐后人脸 Laplacian 方差作为清晰度分数，低于阈值的模糊帧直接跳过
+- 🧬 **视频多帧融合**：增量累加整段流的特征（`float[]`），融合向量连续收敛或达到帧数上限时**提前完成**，无需等整段视频结束
+- 🏷️ **人脸管理**：注册 / 查询 / 删除 REST API，特征与元数据持久化为 JSON 索引（`index.json`），重启免重新提取
+- ⚡ **性能优化**：`ArrayPool` 大缓冲复用、`TensorPrimitives` SIMD 向量化、ONNX 会话独立线程配置、AOT 发布、源生成 JSON 序列化
+- 🔌 **线格式**：内部统一 `float[]` 特征，仅在 HTTP / JSON 边界经自定义 Converter 以 base64 编解码
 
 ## 技术栈
 
@@ -19,11 +18,11 @@
 | --- | --- |
 | ASP.NET Core Minimal API | .NET 10，`WebApplication.CreateSlimBuilder` |
 | Microsoft.ML.OnnxRuntime 1.27.1 | ONNX 推理 |
-| SCRFD-10g | 人脸检测模型 |
-| ArcFace w600k_r50 | 人脸特征提取模型 |
-| SixLabors.ImageSharp 4.x | 图像解码 / 裁剪 / 缩放 |
+| SCRFD-10g | 人脸检测模型（`det_10g.onnx`） |
+| ArcFace w600k_r50 | 人脸特征提取模型（`w600k_r50.onnx`） |
+| SixLabors.ImageSharp 4.x | 图像解码 / 对齐 / 缩放 |
 | ffmpeg | H264/H265 裸流 → BMP 帧流式解码 |
-| System.Numerics.Tensors | 512 维余弦相似度计算 |
+| System.Numerics.Tensors | 特征融合与余弦相似度计算 |
 
 ## 目录结构
 
@@ -31,23 +30,26 @@
 FaceFeature/
 ├── Program.cs                    # 入口：服务注册、路由端点
 ├── OnnxSessionOptions.cs         # ONNX 会话配置模型（Face / FaceRec）
-├── appsettings.json              # Kestrel 端口、ONNX 线程配置
-├── Handlers/
-│   ├── DetectHandler.cs          # 检测端点处理（图片 / URL / H264 / H265 流）
-│   └── RecognizeHandler.cs       # 识别端点处理（1:N 分组比对）
-├── Services/
+├── FaceQualityOptions.cs         # 清晰度筛选配置模型
+├── AppJsonSerializerContext.cs   # 源生成 JSON 序列化上下文
+├── appsettings.json              # Kestrel 端口、ONNX 线程、清晰度阈值配置
+├── Handlers/                     # HTTP 处理器（薄编排，不包含复杂逻辑）
+│   ├── DetectHandler.cs          # 视频检测端点（融合）
+│   ├── RecognizeHandler.cs       # 视频识别端点（融合 + 1:N 比对）
+│   └── FaceGroupHandler.cs       # 人脸管理端点
+├── Services/                     # 需 DI 注册的服务
 │   ├── FaceDetector.cs           # SCRFD-10g 人脸检测
-│   ├── FaceExtractor.cs          # ArcFace 特征提取
-│   ├── DetectService.cs          # 检测编排：检测 → 特征提取
-│   ├── IFaceGroupProvider.cs     # 人脸分组提供者接口
-│   └── MockFaceGroupProvider.cs  # 基于文件目录的实现
-├── Payloads/                     # 请求 / 响应模型（record）
-├── Helpers/
+│   ├── FaceExtractor.cs          # 对齐 + ArcFace 特征提取 + 清晰度评估
+│   ├── DetectService.cs          # 检测编排 + 视频逐帧检测流
+│   └── FaceGroupService.cs       # 人脸分组管理（注册 / 查询 / 删除 / 持久化）
+├── Payloads/                     # 数据模型（API 线格式使用 public，其余 internal）
+├── Helpers/                      # 静态工具
 │   ├── VideoDecoder.cs           # ffmpeg pipe 流式解码
+│   ├── FaceVideoFusion.cs        # 视频多帧融合（收敛提前完成）
 │   └── Log.cs                    # 结构化日志
 ├── models/                       # ONNX 模型（见“模型准备”）
 ├── tools/                        # ffmpeg / ffmpeg.exe
-├── datas/facegroups/             # 分组人脸注册目录
+├── datas/facegroups/             # 人脸注册数据（图片 + index.json）
 └── scripts/setup_models.py       # 模型下载脚本
 ```
 
@@ -75,28 +77,25 @@ python scripts/setup_models.py
 
 ### 2. 放置 ffmpeg
 
-将 ffmpeg 可执行文件放入 `tools/` 目录（仅视频流端点需要；图片端点不需要）：
+将 ffmpeg 可执行文件放入 `tools/` 目录：
 
 | 平台 | 路径 |
 | --- | --- |
 | Windows | `tools/ffmpeg.exe` |
 | Linux | `tools/ffmpeg` |
 
-### 3. 注册人脸分组
+### 3. 注册人脸
 
-按以下目录结构放入人物照片，目录名即 `groupId` / 人物名称：
+启动服务后通过人脸管理接口注册（注册照会检测、对齐、提特征并持久化）：
 
-```
-datas/facegroups/
-└── group1/                # 分组 ID
-    ├── 张小姐/
-    │   ├── 正面.jpeg
-    │   └── 侧面.png
-    └── 赖弟弟/
-        └── 02_0004.jpg
+```bash
+# 在 group1 分组下注册一张照片，人物名 lai
+curl -X POST "http://localhost:9000/faces/group1/register?name=lai" \
+     --data-binary @out_0005.png \
+     -H "Content-Type: application/octet-stream"
 ```
 
-服务启动时会对每张照片自动执行人脸检测 + 特征提取，用于后续比对。
+注册成功返回 `FaceInfo`（含 `id`、`features`）；未检测到人脸或参数非法时返回 `400 {"error":"..."}`。
 
 ### 4. 运行
 
@@ -107,86 +106,91 @@ dotnet run
 
 默认监听 `http://*:9000`（见 `appsettings.json`）。开发模式下受 `launchSettings.json` 影响，默认端口为 `https://localhost:63937`。
 
-> **注意**：内置的 `MockFaceGroupProvider` 是目录实现的参考实现，仅演示用。实际接入时实现 `IFaceGroupProvider` 接口（如从数据库 / Redis 加载人物特征）并在 `Program.cs` 中替换注册即可。
-
 ## API
 
 ### 健康检查
 
-`GET /`
+`GET /` → 返回 `HealthCheck`。
 
-返回 `HealthCheck`。
-
-### 人脸检测
+### 人脸检测（视频）
 
 | 方法 | 路径 | 请求体 | 说明 |
 | --- | --- | --- | --- |
-| POST | `/detect/image` | `application/octet-stream` 原始图片二进制 | 检测面积最大的最佳人脸 |
-| POST | `/detect/imageurl` | JSON `{ "imageUrl": "https://..." }` | 通过 URL 下载图片后检测 |
-| POST | `/detect/h264stream` | H264 裸流（Annex B） | 边解码边检测，默认每 5 秒抽一帧 |
+| POST | `/detect/h264stream` | H264 裸流（Annex B） | 多帧融合后返回单个检测结果 |
 | POST | `/detect/h265stream` | H265/HEVC 裸流 | 同上 |
 
-视频流端点支持查询参数：
+查询参数：
 
-- `frameIntervalSeconds`：帧间隔秒数（如 `0.5` 表示每 0.5 秒一帧，`<=0` 表示全部帧）
+- `frameIntervalSeconds`：抽帧间隔秒数，默认 `0.5`；`<=0` 表示解码全部帧
+- `fusionFrames`：融合帧数上限，默认 `30`；`<=0` 表示不设上限
 
-检测响应（无人脸时返回空 / `null`）：
+响应（无人脸时返回 `null`）：
 
 ```json
 {
-  "bbox": { "x": 120, "y": 80, "width": 180, "height": 220 },
-  "confidence": 0.98,
-  "features": "<base64 编码的 512 维特征向量原始字节>"
+  "bbox": { "x": 1248, "y": 639, "width": 123, "height": 160 },
+  "confidence": 0.708,
+  "features": "<base64 编码的 512 维特征原始字节>",
+  "sharpness": 710.3
 }
 ```
 
-### 人脸识别（1:N 分组比对）
+### 人脸识别（1:N 分组比对，视频）
 
 | 方法 | 路径 | 请求体 | 说明 |
 | --- | --- | --- | --- |
-| POST | `/recognize/image/{groupId}` | `application/octet-stream` | 上传图片识别 |
-| POST | `/recognize/imageurl/{groupId}` | JSON | URL 图片识别 |
-| POST | `/recognize/h264stream/{groupId}` | H264 裸流 | 流式识别，逐帧返回命中结果 |
+| POST | `/recognize/h264stream/{groupId}` | H264 裸流 | 整段流融合后返回单个识别结果 |
 | POST | `/recognize/h265stream/{groupId}` | H265/HEVC 裸流 | 同上 |
 
-支持查询参数：
+查询参数：
 
-- `similarityThreshold`：相似度阈值（默认 `0.5`，`FaceRecognition.SimilarityThreshold` 常量）
-- `frameIntervalSeconds`：视频流抽帧间隔（默认 5 秒）
+- `frameIntervalSeconds`：抽帧间隔秒数，默认 `0.5`
+- `similarityThreshold`：相似度阈值，默认 `0.6`（按门禁摄像头实测标定，见“阈值标定”）
+- `fusionFrames`：融合帧数上限，默认 `30`
 
-识别响应：与分组中某人物余弦相似度超过阈值时返回命中人物，否则为空：
+响应：融合后与分组中某人物余弦相似度超过阈值时返回命中人物，否则返回 `null`：
 
 ```json
 {
-  "id": "正面.jpeg",
+  "id": "20260803_195324_656-d812558d",
   "groupId": "group1",
-  "name": "张小姐",
-  "faceSimilarity": 0.9234
+  "name": "lai",
+  "faceSimilarity": 0.8651
 }
 ```
+
+### 人脸管理
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/faces/{groupId}/register?name={人物名}` | 注册人脸（原始图片字节），成功返回 `FaceInfo`（含特征） |
+| GET | `/faces/{groupId}` | 分组人脸列表（`FaceInfo[]`，不含特征） |
+| GET | `/faces/{groupId}/{faceId}` | 单张详情（含特征） |
+| DELETE | `/faces/{groupId}/{faceId}` | 删除，返回 `{"deleted":true}`；不存在返回 `404` |
+
+错误统一返回 `{"error":"..."}`（400）；`groupId` / `name` / `faceId` 会做路径穿越防护。
 
 ### 调用示例
 
 ```bash
-# 图片检测
-curl -X POST http://localhost:9000/detect/image \
-     --data-binary @photo.jpg \
-     -H "Content-Type: application/octet-stream"
-
-# 图片识别（group1 分组）
-curl -X POST http://localhost:9000/recognize/image/group1 \
-     --data-binary @photo.jpg \
-     -H "Content-Type: application/octet-stream"
-
-# URL 识别
-curl -X POST http://localhost:9000/recognize/imageurl/group1 \
-     -H "Content-Type: application/json" \
-     -d '{"imageUrl": "https://example.com/face.jpg"}'
-
-# H264 裸流识别（每 5 秒抽一帧）
-curl -X POST "http://localhost:9000/recognize/h264stream/group1?frameIntervalSeconds=5" \
+# H264 裸流识别（默认参数：0.5s 抽帧 + 多帧融合）
+curl -X POST http://localhost:9000/recognize/h264stream/group1 \
      --data-binary @stream.h264 \
      -H "Content-Type: application/octet-stream"
+
+# 指定阈值与抽帧间隔
+curl -X POST "http://localhost:9000/recognize/h264stream/group1?similarityThreshold=0.7&frameIntervalSeconds=0.2" \
+     --data-binary @stream.h264 \
+     -H "Content-Type: application/octet-stream"
+
+# 注册人脸
+curl -X POST "http://localhost:9000/faces/group1/register?name=lai" \
+     --data-binary @photo.jpg \
+     -H "Content-Type: application/octet-stream"
+
+# 查询 / 删除
+curl http://localhost:9000/faces/group1
+curl -X DELETE http://localhost:9000/faces/group1/{faceId}
 ```
 
 ### Swagger UI
@@ -197,22 +201,34 @@ curl -X POST "http://localhost:9000/recognize/h264stream/group1?frameIntervalSec
 
 ### 人脸检测（SCRFD-10g）
 
-- 图像居中 letterbox 缩放至 640×640，黑色填充
-- 按输出张量数量自动识别模型布局（3 层 / 5 层、是否含关键点、每像素锚点数）
-- 边界框解码后映射回原图坐标，NMS 去重
-- 过滤过小的人脸（宽高低于 `MinFaceSize` 的特征不可靠）
+- 图像居中 letterbox 缩放至 640×640，黑色填充；模型固定为 3 层 FPN、每像素 2 anchor、channels-last、5 关键点
+- 边界框与关键点解码后映射回原图坐标，NMS 去重，过滤小于 `MinFaceSize` 的人脸
 
-### 特征提取（ArcFace）
+### 五点对齐（FaceExtractor）
 
-- 人脸框外扩 20% 获取头部轮廓上下文
-- 保持宽高比缩放至 112×112，黑色填充居中
-- InsightFace 归一化：`(pixel - 127.5) / 128.0`
-- 输出 512 维 L2 归一化特征（`byte[]`，内部为 `float` 原始字节）
+- 用 SCRFD 5 关键点（左眼、右眼、鼻尖、左嘴角、右嘴角）做最小二乘相似变换，仿射到 InsightFace ArcFace 112×112 标准模板
+- 逆映射双线性采样，等价 `cv2.warpAffine(INTER_LINEAR)`；无关键点时回退为裁剪缩放
+
+### 清晰帧筛选
+
+- 对齐后人脸做灰度化 → 3×3 Laplacian → 响应方差（`TensorPrimitives` 向量化求和）作为清晰度分数
+- 低于 `FaceQuality:SharpnessThreshold`（默认 10）的帧跳过，不参与特征提取与融合
+
+### 视频多帧融合（FaceVideoFusion）
+
+- 逐帧增量累加特征（`TensorPrimitives.Add`），均值 + L2 归一化
+- 累计 ≥3 帧后，相邻融合向量余弦连续 2 次 ≥ 0.99（或达到 `fusionFrames` 上限）即判定收敛，**提前完成**并停止读取剩余流
+- 一个视频输入只产出一个融合结果
 
 ### 特征比对
 
-- `FacePerson.Similarity`：基于 `System.Numerics.Tensors.TensorPrimitives` 计算余弦相似度
-- 识别时遍历分组内所有人，取超过阈值中的最高相似度者
+- `FacePerson.Similarity`：基于 `TensorPrimitives.Dot / Norm` 计算余弦相似度
+- 内部链路统一 `float[]`；仅 HTTP 响应与 `index.json` 持久化经 `FloatArrayBase64Converter` 以 base64 编解码
+
+### 人脸管理持久化
+
+- 注册时保存原始图片到 `datas/facegroups/{groupId}/images/{faceId}.jpg`，并把特征与元数据（base64）写入 `{groupId}/index.json`
+- 启动时只读取各分组 `index.json` 载入内存，不扫描图片、不重新提取特征
 
 ### 视频流解码（VideoDecoder）
 
@@ -227,11 +243,22 @@ curl -X POST "http://localhost:9000/recognize/h264stream/group1?frameIntervalSec
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
 | `Kestrel.Endpoints.Http.Url` | `http://*:9000` | 监听地址 |
-| `Onnx.Face.IntraOpNumThreads` | `1` | 检测会话线程数 |
+| `Onnx.Face.IntraOpNumThreads` | `1` | 检测会话线程数（门禁场景实测建议 2~4，约 2.6 倍提速） |
 | `Onnx.FaceRec.IntraOpNumThreads` | `0` | 特征提取会话线程数（0 = 全部核心） |
+| `FaceQuality.Enabled` | `true` | 是否启用清晰帧筛选 |
+| `FaceQuality.SharpnessThreshold` | `10` | 清晰度阈值（Laplacian 方差，按摄像头画质标定） |
 | 请求体上限 | 20 MB | `Program.cs` Kestrel 限制 |
 
 ONNX 会话级选项（`OnnxSessionOptions`）可独立配置两个模型的 `IntraOpNumThreads`、`InterOpNumThreads`、`ExecutionMode`、`GraphOptimizationLevel`。
+
+## 阈值标定
+
+默认相似度阈值 `0.6` 基于门禁摄像头实测数据标定：
+
+- 同人多帧融合约 `0.84+`，单帧最高约 `0.88`
+- 同人跨帧单帧约 `0.52~0.68`（受跨尺度 / 姿态影响）
+
+正式上线前请用一批**异人样本**验证误识率：若异人相似度普遍低于 `0.5`，`0.6` 是安全的；否则需上调。清晰度阈值同理按实际摄像头画质调整（可在日志中观察每帧 sharpness 分数）。
 
 ## 发布部署
 
@@ -253,15 +280,18 @@ A：未找到模型文件，先执行 `python scripts/setup_models.py` 或将模
 **Q：视频流端点报 "找不到 ffmpeg"？**
 A：将 ffmpeg 可执行文件放入 `tools/` 目录（Windows: `ffmpeg.exe`，Linux: `ffmpeg`）。
 
-**Q：识别一直返回空？**
-A：检查 `datas/facegroups/{groupId}/` 目录是否存在且含可识别的人脸照片；确认 `similarityThreshold` 阈值是否过高。
+**Q：识别一直返回 null？**
+A：确认分组下已通过 `/faces/{groupId}/register` 注册人脸；确认 `similarityThreshold` 是否过高；可用 `/detect/h264stream` 观察返回的 `sharpness` 判断输入清晰度。
 
 **Q：请求体过大被拒绝？**
 A：默认上限 20 MB，可在 `Program.cs` 中调整 `MaxRequestBodySize`。
 
+**Q：特征列表现为什么是 base64？**
+A：内部统一使用 `float[]`；HTTP 响应与 `index.json` 为压缩线格式，通过 `FloatArrayBase64Converter` 自动编解码，调用方无需关心。
+
 ## 路线图 / 待办
 
-- [ ] 将 `MockFaceGroupProvider` 替换为数据库 / Redis 存储实现
-- [ ] 人脸注册 / 更新 / 删除的完整 CRUD API
+- [ ] 将文件目录持久化替换为数据库 / Redis 存储实现
 - [ ] 门铃场景触发式识别（事件驱动、唤醒帧）支持
 - [ ] 更细粒度的性能指标与耗时监控
+- [ ] 检测模型 INT8 量化与精度回归

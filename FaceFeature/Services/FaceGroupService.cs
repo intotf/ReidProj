@@ -47,7 +47,9 @@ public sealed class FaceGroupService
         lock (_lock)
         {
             if (!_groups.TryGetValue(groupId, out var list) || list.Count == 0)
+            {
                 return Task.FromResult(Array.Empty<FacePerson>());
+            }
 
             return Task.FromResult(
                 list.Select(r => new FacePerson(r.Id, r.GroupId, r.Name, r.Features)).ToArray());
@@ -62,7 +64,9 @@ public sealed class FaceGroupService
         lock (_lock)
         {
             if (!_groups.TryGetValue(groupId, out var list))
+            {
                 return Task.FromResult(Array.Empty<FaceInfo>());
+            }
 
             return Task.FromResult(list.Select(r => r.ToInfo(includeFeatures: false)).ToArray());
         }
@@ -76,7 +80,9 @@ public sealed class FaceGroupService
         lock (_lock)
         {
             if (!_groups.TryGetValue(groupId, out var list))
+            {
                 return Task.FromResult<FaceInfo?>(null);
+            }
 
             var record = list.FirstOrDefault(r => string.Equals(r.Id, faceId, StringComparison.OrdinalIgnoreCase));
             return Task.FromResult(record?.ToInfo(includeFeatures));
@@ -99,12 +105,10 @@ public sealed class FaceGroupService
         groupId = ValidateSegment(groupId, nameof(groupId));
         name = ValidateSegment(name, nameof(name));
 
-        byte[] bytes;
+        using var imageBuffer = new MemoryStream();
         try
         {
-            using var buffer = new MemoryStream();
-            await imageStream.CopyToAsync(buffer, cancellationToken);
-            bytes = buffer.ToArray();
+            await imageStream.CopyToAsync(imageBuffer, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -112,13 +116,16 @@ public sealed class FaceGroupService
             return FaceRegistrationResult.Failed("图片读取失败");
         }
 
-        if (bytes.Length == 0)
+        if (imageBuffer.Length == 0)
+        {
             return FaceRegistrationResult.Failed("请求体为空");
+        }
 
         Image<Rgb24> image;
         try
         {
-            image = Image.Load<Rgb24>(bytes);
+            imageBuffer.Position = 0;
+            image = Image.Load<Rgb24>(imageBuffer);
         }
         catch (Exception ex)
         {
@@ -134,7 +141,9 @@ public sealed class FaceGroupService
         }
 
         if (detection is null)
+        {
             return FaceRegistrationResult.Failed("未检测到可用人脸");
+        }
 
         var id = $"{DateTime.Now:yyyyMMdd_HHmmss_fff}-{Guid.NewGuid():N}"[..28];
         var imagesDir = Path.Combine(_root, groupId, ImagesDirName);
@@ -142,7 +151,9 @@ public sealed class FaceGroupService
         try
         {
             Directory.CreateDirectory(imagesDir);
-            await File.WriteAllBytesAsync(filePath, bytes, cancellationToken);
+            imageBuffer.Position = 0;
+            await using var fileStream = File.Create(filePath);
+            await imageBuffer.CopyToAsync(fileStream, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -182,12 +193,16 @@ public sealed class FaceGroupService
             lock (_lock)
             {
                 if (_groups.TryGetValue(groupId, out var list))
+                {
                     list.Remove(record);
+                }
             }
             try
             {
                 if (File.Exists(filePath))
+                {
                     File.Delete(filePath);
+                }
             }
             catch
             {
@@ -217,11 +232,15 @@ public sealed class FaceGroupService
         lock (_lock)
         {
             if (!_groups.TryGetValue(groupId, out var list))
+            {
                 return Task.FromResult(false);
+            }
 
             record = list.FirstOrDefault(r => string.Equals(r.Id, faceId, StringComparison.OrdinalIgnoreCase));
             if (record is null)
+            {
                 return Task.FromResult(false);
+            }
 
             list.Remove(record);
         }
@@ -236,7 +255,9 @@ public sealed class FaceGroupService
             lock (_lock)
             {
                 if (_groups.TryGetValue(groupId, out var list))
+                {
                     list.Add(record);
+                }
             }
             Log.FaceStoreError(_logger, $"删除注册人脸失败: {groupId}/{faceId}", ex);
             return Task.FromResult(false);
@@ -245,15 +266,21 @@ public sealed class FaceGroupService
         try
         {
             if (File.Exists(record.ImagePath))
+            {
                 File.Delete(record.ImagePath);
+            }
 
             var imagesDir = Path.GetDirectoryName(record.ImagePath);
             if (imagesDir is not null && Directory.Exists(imagesDir) && !Directory.EnumerateFileSystemEntries(imagesDir).Any())
+            {
                 Directory.Delete(imagesDir);
+            }
 
             var groupDir = Path.Combine(_root, groupId);
             if (Directory.Exists(groupDir) && !Directory.EnumerateFileSystemEntries(groupDir).Any())
+            {
                 Directory.Delete(groupDir);
+            }
         }
         catch (Exception ex)
         {
@@ -269,14 +296,18 @@ public sealed class FaceGroupService
     private void LoadIndexes()
     {
         if (!Directory.Exists(_root))
+        {
             return;
+        }
 
         foreach (var groupDir in Directory.GetDirectories(_root))
         {
             var groupId = Path.GetFileName(groupDir);
             var indexPath = Path.Combine(groupDir, IndexFileName);
             if (!File.Exists(indexPath))
+            {
                 continue;
+            }
 
             try
             {
@@ -305,7 +336,7 @@ public sealed class FaceGroupService
                             Features = s.FaceFeatures,
                             Confidence = s.Confidence,
                             Sharpness = s.Sharpness,
-                            Bbox = new BoundingBox(s.BboxX, s.BboxY, s.BboxWidth, s.BboxHeight),
+        Bbox = new Rectangle(s.BboxX, s.BboxY, s.BboxWidth, s.BboxHeight),
                             ImagePath = Path.Combine(groupDir, s.ImageFile),
                             RegisteredAt = s.RegisteredAt,
                         });
@@ -368,10 +399,10 @@ public sealed class FaceGroupService
         public required string Id { get; init; }
         public required string GroupId { get; init; }
         public required string Name { get; init; }
-        public required byte[] Features { get; init; }
+        public required float[] Features { get; init; }
         public required float Confidence { get; init; }
         public required float Sharpness { get; init; }
-        public required BoundingBox Bbox { get; init; }
+        public required Rectangle Bbox { get; init; }
         public required string ImagePath { get; init; }
         public required DateTime RegisteredAt { get; init; }
 

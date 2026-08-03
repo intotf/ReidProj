@@ -67,9 +67,13 @@ public sealed class FaceDetector : IDisposable
         // 搜索模型文件路径（输出目录 → 项目目录）
         var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "det_10g.onnx");
         if (!File.Exists(modelPath))
+        {
             modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "det_10g.onnx");
+        }
         if (!File.Exists(modelPath))
+        {
             throw new FileNotFoundException("请先将 det_10g.onnx 放到 models/ 目录下", modelPath);
+        }
 
         _session = new InferenceSession(modelPath, onnxOptions.Value.Face);
 
@@ -149,7 +153,9 @@ public sealed class FaceDetector : IDisposable
     {
         var detections = DetectAll(image);
         if (detections.Count == 0)
+        {
             return null;
+        }
 
         FaceBox? best = null;
         int bestArea = -1;
@@ -240,7 +246,9 @@ public sealed class FaceDetector : IDisposable
             float raw = scores[i];
             float score = 1f / (1f + MathF.Exp(-raw));
             if (score < ConfidenceThreshold)
+            {
                 continue;
+            }
 
             // 线性索引 → 锚点索引 → 像素坐标 → anchor 中心点（单位：像素）
             int pixelIdx = Math.DivRem(i, numAnchors, out _);
@@ -287,7 +295,10 @@ public sealed class FaceDetector : IDisposable
     private static List<FaceBox> Nms(List<Candidate> cs)
     {
         var result = new List<FaceBox>();
-        if (cs.Count == 0) return result;
+        if (cs.Count == 0)
+        {
+            return result;
+        }
 
         cs.Sort((a, b) => b.Score.CompareTo(a.Score));
 
@@ -296,14 +307,20 @@ public sealed class FaceDetector : IDisposable
 
         for (int i = 0; i < n; i++)
         {
-            if (suppressed[i]) continue;
+            if (suppressed[i])
+            {
+                continue;
+            }
             var c = cs[i];
             result.Add(new FaceBox(new Rectangle((int)c.X, (int)c.Y, (int)c.W, (int)c.H), c.Score, c.Keypoints));
 
             float areaI = c.W * c.H;
             for (int j = i + 1; j < n; j++)
             {
-                if (suppressed[j]) continue;
+                if (suppressed[j])
+                {
+                    continue;
+                }
                 var d = cs[j];
 
                 float ix = Math.Max(c.X, d.X);
@@ -311,12 +328,17 @@ public sealed class FaceDetector : IDisposable
                 float iw = Math.Min(c.X + c.W, d.X + d.W) - ix;
                 float ih = Math.Min(c.Y + c.H, d.Y + d.H) - iy;
 
-                if (iw <= 0 || ih <= 0) continue;
+                if (iw <= 0 || ih <= 0)
+                {
+                    continue;
+                }
 
                 float inter = iw * ih;
                 float iou = inter / (areaI + d.W * d.H - inter);
                 if (iou > NmsThreshold)
+                {
                     suppressed[j] = true;
+                }
             }
         }
 

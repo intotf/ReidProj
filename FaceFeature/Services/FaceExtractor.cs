@@ -9,7 +9,7 @@ using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
 using System.Numerics;
-using System.Runtime.InteropServices;
+using System.Numerics.Tensors;
 
 namespace FaceFeature.Services;
 
@@ -51,9 +51,13 @@ public sealed class FaceExtractor : IDisposable
 
         var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "w600k_r50.onnx");
         if (!File.Exists(modelPath))
+        {
             modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "w600k_r50.onnx");
+        }
         if (!File.Exists(modelPath))
+        {
             throw new FileNotFoundException("请先运行 scripts/setup_models.py 导出人脸特征模型", modelPath);
+        }
 
         _session = new InferenceSession(modelPath, onnxOptions.Value.FaceRec);
     }
@@ -72,13 +76,13 @@ public sealed class FaceExtractor : IDisposable
             var sw = Stopwatch.StartNew();
             var aligned = WarpByLandmarks(sourceImage, face.Keypoints);
             Log.FaceAligned(_logger, 5, sw.Elapsed.TotalMilliseconds);
-            float sharpness = FaceQuality.EstimateSharpness(aligned);
+            float sharpness = EstimateSharpness(aligned);
             Log.FaceSharpness(_logger, sharpness);
             return new FaceExtraction(aligned, sharpness);
         }
 
         var fallback = AlignFallback(sourceImage, face.Bbox);
-        float fallbackSharpness = FaceQuality.EstimateSharpness(fallback);
+        float fallbackSharpness = EstimateSharpness(fallback);
         Log.FaceSharpness(_logger, fallbackSharpness);
         return new FaceExtraction(fallback, fallbackSharpness);
     }
@@ -87,8 +91,8 @@ public sealed class FaceExtractor : IDisposable
     /// 从已对齐的 112×112 人脸提取 512 维 L2 归一化特征向量
     /// </summary>
     /// <param name="alignedCrop">已对齐的 112×112 人脸图</param>
-    /// <returns>L2 归一化的 512 维特征向量（原始字节）</returns>
-    public byte[] ExtractFeatures(Image<Rgb24> alignedCrop)
+    /// <returns>L2 归一化的 512 维特征向量</returns>
+    public float[] ExtractFeatures(Image<Rgb24> alignedCrop)
     {
         var sw = Stopwatch.StartNew();
 
@@ -126,7 +130,7 @@ public sealed class FaceExtractor : IDisposable
             var output = (DenseTensor<float>)results[0].AsTensor<float>();
 
             Log.FaceFeatureExtracted(_logger, output.Length, sw.Elapsed.TotalMilliseconds);
-            return MemoryMarshal.Cast<float, byte>(output.Buffer.Span).ToArray();
+            return output.Buffer.Span.ToArray();
         }
         finally
         {
@@ -205,7 +209,9 @@ public sealed class FaceExtractor : IDisposable
             for (int r = col + 1; r < 4; r++)
             {
                 if (Math.Abs(aug[r * 5 + col]) > Math.Abs(aug[pivot * 5 + col]))
+                {
                     pivot = r;
+                }
             }
 
             if (pivot != col)
@@ -218,7 +224,9 @@ public sealed class FaceExtractor : IDisposable
 
             double piv = aug[col * 5 + col];
             if (Math.Abs(piv) < 1e-9)
+            {
                 return Matrix3x2.Identity;
+            }
 
             for (int r = col + 1; r < 4; r++)
             {
@@ -252,7 +260,9 @@ public sealed class FaceExtractor : IDisposable
     {
         int w = source.Width, h = source.Height;
         if (sx < 0 || sy < 0 || sx >= w || sy >= h)
+        {
             return default;
+        }
 
         int x0 = (int)MathF.Floor(sx);
         int y0 = (int)MathF.Floor(sy);
@@ -308,6 +318,66 @@ public sealed class FaceExtractor : IDisposable
         int w = Math.Clamp(rect.Width + expandW, 1, maxW - x);
         int h = Math.Clamp(rect.Height + expandH, 1, maxH - y);
         return new Rectangle(x, y, w, h);
+    }
+
+    /// <summary>
+    /// 计算图像清晰度分数：灰度化（Rec.601）→ 3×3 Laplacian → 响应方差（TensorPrimitives 向量化求和）
+    /// </summary>
+    /// <param name="image">人脸裁剪图（建议对齐后的 112×112）</param>
+    /// <returns>Laplacian 方差，数值越大越清晰；图像过小时返回 0</returns>
+    private static float EstimateSharpness(Image<Rgb24> image)
+    {
+        int w = image.Width, h = image.Height;
+        if (w < 3 || h < 3)
+        {
+            return 0f;
+        }
+
+        int planeSize = w * h;
+        int responseCount = (w - 2) * (h - 2);
+
+        // ArrayPool：租用数组的实际长度可能大于申请长度，必须按实际长度切片使用
+        byte[] lumaRented = ArrayPool<byte>.Shared.Rent(planeSize);
+        float[] responsesRented = ArrayPool<float>.Shared.Rent(responseCount);
+        try
+        {
+            image.ProcessPixelRows(acc =>
+            {
+                for (int y = 0; y < h; y++)
+                {
+                    var row = acc.GetRowSpan(y);
+                    int off = y * w;
+                    for (int x = 0; x < w; x++)
+                    {
+                        var p = row[x];
+                        lumaRented[off + x] = (byte)((p.R * 299 + p.G * 587 + p.B * 114) / 1000);
+                    }
+                }
+            });
+
+            var luma = lumaRented.AsSpan(0, planeSize);
+            var responses = responsesRented.AsSpan(0, responseCount);
+            int idx = 0;
+            for (int y = 1; y < h - 1; y++)
+            {
+                int off = y * w;
+                for (int x = 1; x < w - 1; x++)
+                {
+                    int p = off + x;
+                    responses[idx++] = -4 * luma[p] + luma[p - w] + luma[p + w] + luma[p - 1] + luma[p + 1];
+                }
+            }
+
+            float sum = TensorPrimitives.Sum(responses);
+            float sumSq = TensorPrimitives.SumOfSquares(responses);
+            float mean = sum / responseCount;
+            return sumSq / responseCount - mean * mean;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(lumaRented);
+            ArrayPool<float>.Shared.Return(responsesRented);
+        }
     }
 
     /// <summary>

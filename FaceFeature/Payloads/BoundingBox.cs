@@ -1,3 +1,5 @@
+using SixLabors.ImageSharp;
+
 namespace FaceFeature.Payloads;
 
 /// <summary>
@@ -12,4 +14,17 @@ public readonly record struct BoundingBox(
     int Y,
     int Width,
     int Height
-);
+)
+{
+    /// <summary>
+    /// 从 ImageSharp.Rectangle 隐式转换（内部检测矩形 → API 边界框）
+    /// </summary>
+    public static implicit operator BoundingBox(Rectangle rect)
+        => new(rect.X, rect.Y, rect.Width, rect.Height);
+
+    /// <summary>
+    /// 从 API 边界框隐式转换为 ImageSharp.Rectangle（内部处理统一使用 Rectangle）
+    /// </summary>
+    public static implicit operator Rectangle(BoundingBox box)
+        => new(box.X, box.Y, box.Width, box.Height);
+}

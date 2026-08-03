@@ -1,5 +1,4 @@
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
 
 namespace FaceFeature.Payloads
 {
@@ -14,8 +13,8 @@ namespace FaceFeature.Payloads
         public string GroupId { get; set; }
         /// <summary>人物名称</summary>
         public string Name { get; set; }
-        /// <summary>人脸特征向量（ArcFace 512-dim 原始字节）</summary>
-        public byte[] FaceFeatures { get; set; } = [];
+        /// <summary>人脸特征向量（ArcFace 512-dim float[]，内部处理使用）</summary>
+        public float[] FaceFeatures { get; set; } = [];
 
         /// <summary>
         /// 人脸分组中的人物信息
@@ -24,7 +23,7 @@ namespace FaceFeature.Payloads
         /// <param name="groupId"></param>
         /// <param name="name"></param>
         /// <param name="faceFeatures"></param>
-        public FacePerson(string id, string groupId, string name, byte[] faceFeatures)
+        public FacePerson(string id, string groupId, string name, float[] faceFeatures)
         {
             Id = id;
             GroupId = groupId;
@@ -37,18 +36,11 @@ namespace FaceFeature.Payloads
         /// </summary>
         /// <param name="features">要比较的特征向量</param>
         /// <returns>余弦相似度</returns>
-        public float Similarity(ReadOnlySpan<byte> features)
+        public float Similarity(ReadOnlySpan<float> features)
         {
             return FaceFeatures == null || FaceFeatures.Length == 0 || features.IsEmpty
                 ? 0f
                 : CosineSimilarity(features, FaceFeatures);
-        }
-
-        private static float CosineSimilarity(ReadOnlySpan<byte> featuresA, ReadOnlySpan<byte> featuresB)
-        {
-            var vectorA = MemoryMarshal.Cast<byte, float>(featuresA);
-            var vectorB = MemoryMarshal.Cast<byte, float>(featuresB);
-            return CosineSimilarity(vectorA, vectorB);
         }
 
         private static float CosineSimilarity(ReadOnlySpan<float> vectorA, ReadOnlySpan<float> vectorB)

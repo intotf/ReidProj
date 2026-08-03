@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace FaceFeature.Payloads;
 
 /// <summary>
@@ -10,6 +12,6 @@ namespace FaceFeature.Payloads;
 public sealed record FaceDetection(
     BoundingBox Bbox,
     float Confidence,
-    byte[] Features,
+    [property: JsonConverter(typeof(FloatArrayBase64Converter))] float[] Features,
     float Sharpness = 0
 );
