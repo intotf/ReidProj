@@ -44,7 +44,7 @@ ReidFeature/
 │   ├── PoseEstimator.cs        #   MoveNet 姿态估计 → 体型标量
 │   ├── TrackFusionService.cs   #   Track 内四维特征融合
 │   ├── DetectService.cs        #   检测编排：解码 → 检测 → 跟踪 → 缓存
-│   ├── FamilyGalleryService.cs #   家庭成员 Gallery（持久化 + datas/family 导入）
+│   ├── FamilyGalleryService.cs #   家庭成员 Gallery（持久化）
 │   └── IPersonGroupProvider.cs #   家庭成员提供者接口
 ├── Helpers/
 │   ├── VideoDecoder.cs         # ffmpeg 管道流式解码
@@ -209,7 +209,7 @@ Query 参数：
 | 目录 | 用途 |
 |---|---|
 | `datas/gallery/` | Gallery 持久化，每个分组一个 `{groupId}.json`（成员四维特征包） |
-| `datas/family/` | 启动时自动导入：每个子目录 `datas/family/{成员名}/enroll.{h264,h265,mp4}` 会被检测、融合并注册到 `default` 分组 |
+| `datas/family/` | 预留目录，注册请通过 `/family/enroll/...` 接口上传视频流 |
 
 ## 构建与发布
 

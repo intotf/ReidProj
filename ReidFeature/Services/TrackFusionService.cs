@@ -47,12 +47,14 @@ public sealed class TrackFusionService
     /// <param name="trackId">ByteTrack Track ID</param>
     /// <param name="frames">该 Track 内所有帧的 (原图, bbox, 检测置信度)</param>
     /// <param name="centers">轨迹中心点序列（可选，用于步态特征）</param>
+    /// <param name="frameIntervalSeconds">抽帧间隔（秒）。&gt;0 时步频按真实时长换算为 Hz；≤0（全部帧模式）时退化为按采样点数归一化</param>
     /// <returns>质量加权融合后的四维特征包</returns>
     /// <remarks>frames 中的 bbox 必须与 Frame 图像同坐标系（Frame 为 bbox 裁剪图时，bbox 应为裁剪图局部坐标，左上角为原点）</remarks>
     public TrackFeaturePack FuseTrack(
         int trackId,
         ReadOnlySpan<(Image<Rgb24> Frame, Rectangle Bbox, float Score)> frames,
-        ReadOnlySpan<PointF> centers = default)
+        ReadOnlySpan<PointF> centers = default,
+        double frameIntervalSeconds = 0)
     {
         var sw = Stopwatch.StartNew();
 
@@ -149,7 +151,7 @@ public sealed class TrackFusionService
             {
                 centers = _tracker.GetTrackCenters(trackId);
             }
-            (float stepFrequency, float swingAmplitude) = ComputeGaitSignals(centers);
+            (float stepFrequency, float swingAmplitude) = ComputeGaitSignals(centers, frameIntervalSeconds);
 
             Log.TrackFusionCompleted(_logger, trackId, frameCount, sw.Elapsed.TotalMilliseconds);
 
@@ -257,7 +259,11 @@ public sealed class TrackFusionService
     /// 步频 = 中心点垂直振荡的零交叉频率
     /// 摆幅 = 水平位置的标准差
     /// </summary>
-    private static (float StepFrequency, float SwingAmplitude) ComputeGaitSignals(ReadOnlySpan<PointF> centers)
+    /// <param name="centers">轨迹中心点序列</param>
+    /// <param name="frameIntervalSeconds">抽帧间隔（秒）；≤0 表示未知（全部帧模式）</param>
+    private static (float StepFrequency, float SwingAmplitude) ComputeGaitSignals(
+        ReadOnlySpan<PointF> centers,
+        double frameIntervalSeconds)
     {
         // 最少 3 个轨迹点：步频零交叉需要连续两个差分，摆幅需要标准差
         if (centers.Length < 3)
@@ -266,20 +272,26 @@ public sealed class TrackFusionService
         }
 
         // 步频：Y 方向零交叉法
-        int zeroCrossings = 0;
-        for (int i = 1; i < centers.Length; i++)
+        // 一次完整垂直振荡包含“正→负”和“负→正”两次符号变化，两者都计数后除以 2 得到周期数
+        int signChanges = 0;
+        for (int i = 2; i < centers.Length; i++)
         {
+            float prevDy = centers[i - 1].Y - centers[i - 2].Y;
             float dy = centers[i].Y - centers[i - 1].Y;
-            if (i > 1)
+            if ((prevDy > 0 && dy <= 0) || (prevDy < 0 && dy >= 0))
             {
-                float prevDy = centers[i - 1].Y - centers[i - 2].Y;
-                if (prevDy > 0 && dy <= 0)
-                {
-                    zeroCrossings++;
-                }
+                signChanges++;
             }
         }
-        float stepFrequency = zeroCrossings / 2f;
+        float cycles = signChanges / 2f;
+
+        // 归一化到频率，避免“同一步频、不同轨迹长度”得到不同数值：
+        // - 已知抽帧间隔时换算为 Hz（周期/秒），注册与识别轨迹时长不同也可直接比较
+        // - 未知（全部帧模式）时退化为“周期/采样点”，至少与轨迹长度无关
+        int sampleCount = centers.Length - 1;
+        float stepFrequency = frameIntervalSeconds > 0
+            ? cycles / (sampleCount * (float)frameIntervalSeconds)
+            : cycles / sampleCount;
 
         // 水平摆幅：X 位置的标准差
         float meanX = 0f;

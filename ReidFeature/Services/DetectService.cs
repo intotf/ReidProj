@@ -22,6 +22,9 @@ public sealed class DetectService : IDisposable
     /// </summary>
     private readonly Dictionary<int, List<(Image<Rgb24> Frame, Rectangle Bbox, float Score)>> _trackFrames = [];
 
+    /// <summary>当前视频流的抽帧间隔（秒），用于步态频率换算；≤0 表示全部帧模式</summary>
+    private double _frameIntervalSeconds;
+
     /// <summary>
     /// 初始化检测编排服务
     /// </summary>
@@ -98,6 +101,8 @@ public sealed class DetectService : IDisposable
         double frameIntervalSeconds,
         CancellationToken cancellationToken)
     {
+        _frameIntervalSeconds = frameIntervalSeconds;
+
         var enumerable = VideoDecoder.DecodeFramesAsync(
             request.Body, codec, logger, frameIntervalSeconds, cancellationToken);
         await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
@@ -154,7 +159,7 @@ public sealed class DetectService : IDisposable
             try
             {
                 // 该 Track 的帧已经通过 ProcessVideoFrame 缓存
-                var pack = _fusion.FuseTrack(trackId, CollectionsMarshal.AsSpan(frames), centers);
+                var pack = _fusion.FuseTrack(trackId, CollectionsMarshal.AsSpan(frames), centers, _frameIntervalSeconds);
 
                 results.Add(new PersonDetection(
                     Bbox: new BoundingBox(firstBbox.X, firstBbox.Y, firstBbox.Width, firstBbox.Height),

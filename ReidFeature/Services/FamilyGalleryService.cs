@@ -1,8 +1,5 @@
 using ReidFeature.Helpers;
 using ReidFeature.Payloads;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
@@ -17,8 +14,6 @@ namespace ReidFeature.Services;
 public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
 {
     private readonly ILogger<FamilyGalleryService> _logger;
-    private readonly YoloDetector _yolo;
-    private readonly IServiceScopeFactory _scopeFactory;
     private readonly string _galleryDir;
 
     private readonly Dictionary<string, List<GalleryEntry>> _groups = [];
@@ -31,25 +26,17 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
     private const float EmaLambda = 0.3f;
 
     /// <summary>
-    /// 初始化家庭成员 Gallery 服务，并加载持久化数据与 datas/family 目录
+    /// 初始化家庭成员 Gallery 服务，并加载持久化数据
     /// </summary>
     /// <param name="logger">日志记录器</param>
-    /// <param name="yolo">YOLO 人物检测器（用于从 datas/family 目录注册）</param>
-    /// <param name="scopeFactory">服务作用域工厂</param>
-    public FamilyGalleryService(
-        ILogger<FamilyGalleryService> logger,
-        YoloDetector yolo,
-        IServiceScopeFactory scopeFactory)
+    public FamilyGalleryService(ILogger<FamilyGalleryService> logger)
     {
         _logger = logger;
-        _yolo = yolo;
-        _scopeFactory = scopeFactory;
         _galleryDir = Path.Combine(AppContext.BaseDirectory, "datas", "gallery") ??
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "datas", "gallery");
 
-        // 启动时加载持久化数据 + 从 datas/family 注册
+        // 启动时加载持久化数据
         LoadGallery();
-        EnrollFromFamilyDirectory().GetAwaiter().GetResult();
     }
 
     // ── IFamilyMemberProvider 实现 ──
@@ -300,106 +287,6 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
             var json = JsonSerializer.Serialize(data, AppJsonSerializerContext.Default.GalleryData);
             var filePath = Path.Combine(_galleryDir, $"{groupId}.json");
             await File.WriteAllTextAsync(filePath, json, ct);
-        }
-    }
-
-    // ── 从 datas/family 目录注册 ──
-
-    private async Task EnrollFromFamilyDirectory()
-    {
-        var familyDataDir = Path.Combine(AppContext.BaseDirectory, "datas", "family")
-            ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "datas", "family");
-
-        if (!Directory.Exists(familyDataDir))
-        {
-            return;
-        }
-
-        foreach (var memberDir in Directory.GetDirectories(familyDataDir))
-        {
-            var memberName = Path.GetFileName(memberDir);
-            var videoFiles = Directory.GetFiles(memberDir, "enroll.h264")
-                .Concat(Directory.GetFiles(memberDir, "enroll.h265"))
-                .Concat(Directory.GetFiles(memberDir, "enroll.mp4"))
-                .ToArray();
-
-            if (videoFiles.Length == 0)
-            {
-                continue;
-            }
-
-            // 仅处理第一个视频文件
-            var videoPath = videoFiles[0];
-            var extension = Path.GetExtension(videoPath).ToLowerInvariant();
-            var codec = extension switch
-            {
-                ".h264" => VideoCodec.H264,
-                ".265" or ".h265" or ".hevc" => VideoCodec.H265,
-                ".mp4" => VideoCodec.H264,  // ffmpeg 会自动封装
-                _ => VideoCodec.H264,
-            };
-
-            _logger.LogInformation("注册成员 {Name} 从 {Video}", memberName, videoPath);
-
-            try
-            {
-                await using var fs = File.OpenRead(videoPath);
-                var frames = new List<(Image<Rgb24> Frame, Rectangle Bbox, float Score)>();
-
-                using var scope = _scopeFactory.CreateScope();
-                var tracker = scope.ServiceProvider.GetRequiredService<ByteTrackTracker>();
-                tracker.Reset();
-
-                await foreach (var image in VideoDecoder.DecodeFramesAsync(fs, codec, _logger, 0, CancellationToken.None))
-                {
-                    using (image)
-                    {
-                        var detections = _yolo.DetectPersons(image);
-                        if (detections.Count == 0)
-                        {
-                            continue;
-                        }
-
-                        var tracked = tracker.Update(detections);
-
-                        // 缓存属于同一个主导 Track 的帧（bbox 裁剪图，降低内存占用）
-                        if (tracked.Count > 0)
-                        {
-                            // 取当前帧置信度最高的 Track
-                            var bestTrack = tracked[0];
-                            float score = detections.First(d => d.Bbox == bestTrack.Bbox).Confidence;
-                            var cropBbox = BoundingBoxHelper.ClampToBounds(bestTrack.Bbox, image.Width, image.Height);
-                            // bbox 同步转为裁剪图局部坐标（左上角为原点），保持与 Frame 图像同坐标系
-                            frames.Add((
-                                image.Clone(ctx => ctx.Crop(cropBbox)),
-                                new Rectangle(0, 0, cropBbox.Width, cropBbox.Height),
-                                score));
-                        }
-                    }
-                }
-
-                // 取完成 Track 进行融合注册
-                var completed = tracker.FlushCompletedTracks();
-                if (completed.Count > 0)
-                {
-                    var best = completed[0];
-
-                    if (frames.Count > 3)
-                    {
-                        var fusion = scope.ServiceProvider.GetRequiredService<TrackFusionService>();
-                        var pack = fusion.FuseTrack(best.TrackId, CollectionsMarshal.AsSpan(frames), best.Centers);
-                        var groupId = "default";
-                        await EnrollAsync(groupId, memberName, pack, CancellationToken.None);
-                    }
-                }
-
-                foreach (var (frame, _, _) in frames)
-                    frame.Dispose();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning("注册失败 {Name}: {Error}", memberName, ex.Message);
-            }
         }
     }
 
