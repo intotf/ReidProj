@@ -26,8 +26,17 @@ static partial class Log
     [LoggerMessage(Level = LogLevel.Information, Message = "视频帧 #{FrameNo} 解码完成, 格式: {Codec}, 累计耗时 {Elapsed:F1}ms")]
     public static partial void VideoDecodeCompleted(ILogger logger, string codec, int frameNo, double elapsed);
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "视频解码启动: 格式={Codec}, 分辨率={Width}x{Height}, 抽帧间隔={Interval:F1}s")]
+    public static partial void VideoDecodeStarted(ILogger logger, string codec, int width, int height, double interval);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "视频全部解码完成, 共 {TotalFrames} 帧, 格式: {Codec}, 总耗时 {Elapsed:F1}ms")]
     public static partial void VideoDecodeAllCompleted(ILogger logger, int totalFrames, string codec, double elapsed);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "ffmpeg 解码失败: {Reason}")]
+    public static partial void VideoDecodeError(ILogger logger, string reason);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "视频编码识别: {Codec}")]
+    public static partial void VideoCodecDetected(ILogger logger, string codec);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "人脸特征: dim={Dim}, 耗时 {Elapsed:F1}ms")]
     public static partial void FaceFeatureExtracted(ILogger logger, long dim, double elapsed);

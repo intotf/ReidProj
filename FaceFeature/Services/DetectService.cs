@@ -79,16 +79,15 @@ public sealed class DetectService
     /// 视频逐帧检测流：解码 H264/H265 裸流，逐帧检测并跳过模糊帧
     /// </summary>
     /// <param name="videoStream">H264/H265 裸流数据流</param>
-    /// <param name="codec">视频编码格式</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
     /// <param name="cancellationToken">取消令牌</param>
-    public async IAsyncEnumerable<FaceDetection> DetectFramesAsync(
+    internal async IAsyncEnumerable<FaceDetection> DetectFramesAsync(
         Stream videoStream,
-        VideoCodec codec,
         double frameIntervalSeconds,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await foreach (var image in VideoDecoder.DecodeFramesAsync(videoStream, codec, _logger, frameIntervalSeconds, cancellationToken))
+        await foreach (var image in VideoDecoder.DecodeFramesAsync(
+            videoStream, _logger, frameIntervalSeconds, cancellationToken))
         {
             using (image)
             {

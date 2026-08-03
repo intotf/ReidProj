@@ -58,20 +58,12 @@ namespace FaceFeature
             app.Map("/", context => context.Response.WriteAsync("HealthCheck"))
                .WithName("HealthCheck");
 
-            app.MapPost("/detect/h264stream", DetectHandler.HandleH264StreamAsync)
-               .WithName("DetectH264Stream")
+            app.MapPost("/detect/stream", DetectHandler.HandleStreamAsync)
+               .WithName("DetectStream")
                .Accepts<byte[]>("application/octet-stream");
 
-            app.MapPost("/detect/h265stream", DetectHandler.HandleH265StreamAsync)
-               .WithName("DetectH265Stream")
-               .Accepts<byte[]>("application/octet-stream");
-
-            app.MapPost("/recognize/h264stream/{groupId}", RecognizeHandler.HandleH264StreamAsync)
-               .WithName("RecognizeH264Stream")
-               .Accepts<byte[]>("application/octet-stream");
-
-            app.MapPost("/recognize/h265stream/{groupId}", RecognizeHandler.HandleH265StreamAsync)
-               .WithName("RecognizeH265Stream")
+            app.MapPost("/recognize/stream/{groupId}", RecognizeHandler.HandleStreamAsync)
+               .WithName("RecognizeStream")
                .Accepts<byte[]>("application/octet-stream");
 
             // ── 人脸管理 ──────────────────────────────────

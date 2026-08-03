@@ -150,16 +150,61 @@ public sealed class FaceExtractor : IDisposable
         Matrix3x2.Invert(forward, out var inverse);
 
         var aligned = new Image<Rgb24>(InputSize, InputSize);
-        aligned.ProcessPixelRows(acc =>
+
+        // 优先使用连续像素内存做随机采样：保留原始逐像素逆映射数学（sx/sy 均依赖 x），
+        // 同时避免逐像素 source[x, y] 索引器的边界检查与调用开销；非连续内存时回退索引器。
+        if (source.DangerousTryGetSinglePixelMemory(out var sourceMemory)
+            && aligned.DangerousTryGetSinglePixelMemory(out var alignedMemory))
+        {
+            var src = sourceMemory.Span;
+            var dst = alignedMemory.Span;
+            int srcW = source.Width, srcH = source.Height;
+
+            for (int y = 0; y < InputSize; y++)
+            {
+                float rowBaseX = inverse.M21 * y + inverse.M31;
+                float rowBaseY = inverse.M22 * y + inverse.M32;
+                int dstOff = y * InputSize;
+
+                for (int x = 0; x < InputSize; x++)
+                {
+                    float sx = inverse.M11 * x + rowBaseX;
+                    float sy = inverse.M12 * x + rowBaseY;
+                    int di = dstOff + x;
+                    if (sx < 0 || sy < 0 || sx >= srcW || sy >= srcH)
+                    {
+                        dst[di] = default;
+                        continue;
+                    }
+
+                    int sx0 = (int)sx;
+                    int sy0 = (int)sy;
+                    int sx1 = Math.Min(sx0 + 1, srcW - 1);
+                    int sy1 = Math.Min(sy0 + 1, srcH - 1);
+                    float fx = sx - sx0;
+                    float fy = sy - sy0;
+
+                    int row0 = sy0 * srcW;
+                    int row1 = sy1 * srcW;
+                    dst[di] = SampleBilinear(
+                        src[row0 + sx0], src[row0 + sx1],
+                        src[row1 + sx0], src[row1 + sx1], fx, fy);
+                }
+            }
+            return aligned;
+        }
+
+        // 兜底：源图内存非连续时使用逐像素索引器（语义与旧实现一致）
+        aligned.ProcessPixelRows(dstAcc =>
         {
             for (int y = 0; y < InputSize; y++)
             {
-                var row = acc.GetRowSpan(y);
+                var dstRow = dstAcc.GetRowSpan(y);
                 for (int x = 0; x < InputSize; x++)
                 {
                     float sx = inverse.M11 * x + inverse.M21 * y + inverse.M31;
                     float sy = inverse.M12 * x + inverse.M22 * y + inverse.M32;
-                    row[x] = SampleBilinear(source, sx, sy);
+                    dstRow[x] = SampleBilinear(source, sx, sy);
                 }
             }
         });
@@ -258,6 +303,24 @@ public sealed class FaceExtractor : IDisposable
 
     /// <summary>
     /// 双线性采样，越界返回黑色（等价 cv2.warpAffine INTER_LINEAR + borderValue=0）
+    /// </summary>
+    private static Rgb24 SampleBilinear(Rgb24 p00, Rgb24 p10, Rgb24 p01, Rgb24 p11, float fx, float fy)
+    {
+        float topR = p00.R + (p10.R - p00.R) * fx;
+        float topG = p00.G + (p10.G - p00.G) * fx;
+        float topB = p00.B + (p10.B - p00.B) * fx;
+        float botR = p01.R + (p11.R - p01.R) * fx;
+        float botG = p01.G + (p11.G - p01.G) * fx;
+        float botB = p01.B + (p11.B - p01.B) * fx;
+
+        return new Rgb24(
+            (byte)Math.Clamp(MathF.Round(topR + (botR - topR) * fy), 0, 255),
+            (byte)Math.Clamp(MathF.Round(topG + (botG - topG) * fy), 0, 255),
+            (byte)Math.Clamp(MathF.Round(topB + (botB - topB) * fy), 0, 255));
+    }
+
+    /// <summary>
+    /// 双线性采样（逐像素索引器版本，仅用于源图内存非连续时的兜底路径）
     /// </summary>
     private static Rgb24 SampleBilinear(Image<Rgb24> source, float sx, float sy)
     {

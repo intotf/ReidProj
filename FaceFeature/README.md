@@ -116,8 +116,7 @@ dotnet run
 
 | 方法 | 路径 | 请求体 | 说明 |
 | --- | --- | --- | --- |
-| POST | `/detect/h264stream` | H264 裸流（Annex B） | 多帧融合后返回单个检测结果 |
-| POST | `/detect/h265stream` | H265/HEVC 裸流 | 同上 |
+| POST | `/detect/stream` | H264/H265 裸流（Annex B） | 多帧融合后返回单个检测结果（编码由 VideoDecoder 自动识别） |
 
 查询参数：
 
@@ -139,8 +138,7 @@ dotnet run
 
 | 方法 | 路径 | 请求体 | 说明 |
 | --- | --- | --- | --- |
-| POST | `/recognize/h264stream/{groupId}` | H264 裸流 | 整段流融合后返回单个识别结果 |
-| POST | `/recognize/h265stream/{groupId}` | H265/HEVC 裸流 | 同上 |
+| POST | `/recognize/stream/{groupId}` | H264/H265 裸流（Annex B） | 整段流融合后返回单个识别结果（编码由 VideoDecoder 自动识别） |
 
 查询参数：
 
@@ -173,13 +171,13 @@ dotnet run
 ### 调用示例
 
 ```bash
-# H264 裸流识别（默认参数：0.5s 抽帧 + 多帧融合）
-curl -X POST http://localhost:9000/recognize/h264stream/group1 \
+# H264/H265 裸流识别（默认参数：0.5s 抽帧 + 多帧融合，编码自动识别）
+curl -X POST http://localhost:9000/recognize/stream/group1 \
      --data-binary @stream.h264 \
      -H "Content-Type: application/octet-stream"
 
 # 指定阈值与抽帧间隔
-curl -X POST "http://localhost:9000/recognize/h264stream/group1?similarityThreshold=0.7&frameIntervalSeconds=0.2" \
+curl -X POST "http://localhost:9000/recognize/stream/group1?similarityThreshold=0.7&frameIntervalSeconds=0.2" \
      --data-binary @stream.h264 \
      -H "Content-Type: application/octet-stream"
 
@@ -281,7 +279,7 @@ A：未找到模型文件，先执行 `python scripts/setup_models.py` 或将模
 A：将 ffmpeg 可执行文件放入 `tools/` 目录（Windows: `ffmpeg.exe`，Linux: `ffmpeg`）。
 
 **Q：识别一直返回 null？**
-A：确认分组下已通过 `/faces/{groupId}/register` 注册人脸；确认 `similarityThreshold` 是否过高；可用 `/detect/h264stream` 观察返回的 `sharpness` 判断输入清晰度。
+A：确认分组下已通过 `/faces/{groupId}/register` 注册人脸；确认 `similarityThreshold` 是否过高；可用 `/detect/stream` 观察返回的 `sharpness` 判断输入清晰度。
 
 **Q：请求体过大被拒绝？**
 A：默认上限 20 MB，可在 `Program.cs` 中调整 `MaxRequestBodySize`。

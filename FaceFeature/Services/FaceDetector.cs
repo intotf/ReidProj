@@ -5,7 +5,6 @@ using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
 
@@ -36,8 +35,14 @@ public sealed class FaceDetector : IDisposable
     /// <summary>SCRFD 预处理的像素标准差</summary>
     private const float ScrfdStd = 128f;
 
-    /// <summary>Letterbox 填充色（黑色）</summary>
-    private static readonly Rgb24 PadColor = new(0, 0, 0);
+    /// <summary>归一化后的黑色像素值 (0 - 127.5) / 128</summary>
+    private const float BlackNorm = -ScrfdMean / ScrfdStd;
+
+    /// <summary>归一化常数：1 / 128</summary>
+    private const float InvStd = 1f / ScrfdStd;
+
+    /// <summary>归一化常数：127.5 / 128</summary>
+    private const float MeanDivStd = ScrfdMean / ScrfdStd;
 
     private readonly ILogger<FaceDetector> _logger;
 
@@ -95,22 +100,18 @@ public sealed class FaceDetector : IDisposable
     {
         var sw = Stopwatch.StartNew();
 
-        // 居中 letterbox → 640×640，黑色填充
+        // 居中 letterbox → 640×640，黑色填充（单趟直写张量，无中间图像分配）
         float scale = Math.Min((float)InputSize / image.Width, (float)InputSize / image.Height);
         int newW = (int)(image.Width * scale);
         int newH = (int)(image.Height * scale);
         float padX = (InputSize - newW) / 2f;
         float padY = (InputSize - newH) / 2f;
 
-        using var resized = image.Clone(ctx => ctx.Resize(newW, newH, KnownResamplers.Lanczos3));
-        using var canvas = new Image<Rgb24>(InputSize, InputSize, PadColor);
-        canvas.Mutate(ctx => ctx.DrawImage(resized, new Point((int)padX, (int)padY), 1f));
-
         int tensorSize = 3 * InputSize * InputSize;
         float[] buffer = ArrayPool<float>.Shared.Rent(tensorSize);
         try
         {
-            FillTensor(canvas, buffer.AsMemory(0, tensorSize));
+            FillTensorLetterbox(image, scale, padX, padY, buffer.AsMemory(0, tensorSize));
 
             var inputName = _session.InputMetadata.Keys.First();
             var input = NamedOnnxValue.CreateFromTensor(inputName,
@@ -178,32 +179,80 @@ public sealed class FaceDetector : IDisposable
     public void Dispose() => _session?.Dispose();
 
     /// <summary>
-    /// 将 640×640 RGB 图像填充为 SCRFD 归一化的 CHW 张量
+    /// 单趟完成 letterbox 缩放 + 归一化：双线性采样源图并直接写入 SCRFD 的 CHW 张量，
+    /// 避免每帧创建缩放图与画布等中间分配（原实现为 Lanczos3 缩放 + DrawImage + 逐像素填充）。
     /// </summary>
     /// <remarks>
     /// 归一化公式: output = (pixel - 127.5) / 128.0
-    /// 输出为 CHW 连续内存布局，三个平面依次为 R→G→B 通道。
+    /// 输出为 CHW 连续内存布局，三个平面依次为 R→G→B 通道；letterbox 区域填黑（归一化后为 BlackNorm）。
+    /// 坐标映射与 DetectAll 的逆映射一致：(src = (out - pad) / scale)，保证检测框映射回原图无偏移。
     /// </remarks>
-    /// <param name="image">640×640 的 letterbox 图像</param>
+    /// <param name="image">源图像（任意分辨率）</param>
+    /// <param name="scale">letterbox 缩放比例</param>
+    /// <param name="padX">letterbox 水平填充量</param>
+    /// <param name="padY">letterbox 垂直填充量</param>
     /// <param name="dest">目标缓冲区，长度至少 3×640×640</param>
-    private static void FillTensor(Image<Rgb24> image, Memory<float> dest)
+    private static void FillTensorLetterbox(
+        Image<Rgb24> image,
+        float scale,
+        float padX,
+        float padY,
+        Memory<float> dest)
     {
-        int h = image.Height, w = image.Width;
-        int planeSize = h * w;
+        int srcW = image.Width, srcH = image.Height;
+        int planeSize = InputSize * InputSize;
+        float invScale = 1f / scale;
+
         image.ProcessPixelRows(acc =>
         {
-            for (int y = 0; y < h; y++)
+            var destSpan = dest.Span;
+            for (int y = 0; y < InputSize; y++)
             {
-                var row = acc.GetRowSpan(y);
-                int rowOff = y * w;
-                var destSpan = dest.Span;
-                for (int x = 0; x < w; x++)
+                int off = y * InputSize;
+                float srcY = (y - padY) * invScale;
+                if (srcY < 0 || srcY >= srcH)
                 {
-                    var p = row[x];
-                    int i = rowOff + x;
-                    destSpan[i] = (p.R - ScrfdMean) / ScrfdStd;
-                    destSpan[planeSize + i] = (p.G - ScrfdMean) / ScrfdStd;
-                    destSpan[2 * planeSize + i] = (p.B - ScrfdMean) / ScrfdStd;
+                    destSpan.Slice(off, InputSize).Fill(BlackNorm);
+                    destSpan.Slice(planeSize + off, InputSize).Fill(BlackNorm);
+                    destSpan.Slice(2 * planeSize + off, InputSize).Fill(BlackNorm);
+                    continue;
+                }
+
+                int y0 = (int)srcY;
+                int y1 = Math.Min(y0 + 1, srcH - 1);
+                float fy = srcY - y0;
+                float invFy = 1f - fy;
+                var row0 = acc.GetRowSpan(y0);
+                var row1 = acc.GetRowSpan(y1);
+
+                for (int x = 0; x < InputSize; x++)
+                {
+                    float srcX = (x - padX) * invScale;
+                    int i = off + x;
+                    if (srcX < 0 || srcX >= srcW)
+                    {
+                        destSpan[i] = BlackNorm;
+                        destSpan[planeSize + i] = BlackNorm;
+                        destSpan[2 * planeSize + i] = BlackNorm;
+                        continue;
+                    }
+
+                    int x0 = (int)srcX;
+                    int x1 = Math.Min(x0 + 1, srcW - 1);
+                    float fx = srcX - x0;
+                    float invFx = 1f - fx;
+
+                    // 双线性插值并归一化，RGB 三通道
+                    float r = invFy * (invFx * row0[x0].R + fx * row0[x1].R)
+                            + fy * (invFx * row1[x0].R + fx * row1[x1].R);
+                    float g = invFy * (invFx * row0[x0].G + fx * row0[x1].G)
+                            + fy * (invFx * row1[x0].G + fx * row1[x1].G);
+                    float b = invFy * (invFx * row0[x0].B + fx * row0[x1].B)
+                            + fy * (invFx * row1[x0].B + fx * row1[x1].B);
+
+                    destSpan[i] = r * InvStd - MeanDivStd;
+                    destSpan[planeSize + i] = g * InvStd - MeanDivStd;
+                    destSpan[2 * planeSize + i] = b * InvStd - MeanDivStd;
                 }
             }
         });

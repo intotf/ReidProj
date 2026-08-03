@@ -14,7 +14,7 @@ namespace FaceFeature.Handlers
         private const float SimilarityThreshold = 0.6f;
 
         /// <summary>
-        /// 处理 H264 视频流识别请求：融合整段流后返回单个识别结果
+        /// 处理 H264/H265 视频流识别请求：融合整段流后返回单个识别结果（编码由 VideoDecoder 自动嗅探）
         /// </summary>
         /// <param name="faceGroupService">人脸分组管理服务</param>
         /// <param name="context">HTTP 上下文</param>
@@ -25,7 +25,7 @@ namespace FaceFeature.Handlers
         /// <param name="similarityThreshold">相似度阈值</param>
         /// <param name="fusionFrames">融合帧数上限（&gt;0）</param>
         /// <param name="cancellationToken">取消令牌</param>
-        public static async Task<FaceRecognition?> HandleH264StreamAsync(
+        public static async Task<FaceRecognition?> HandleStreamAsync(
             FaceGroupService faceGroupService,
             HttpContext context,
             DetectService detectService,
@@ -38,26 +38,7 @@ namespace FaceFeature.Handlers
         {
             return await RecognizeAsync(
                 faceGroupService, context.Request, detectService, logger, groupId,
-                VideoCodec.H264, frameIntervalSeconds, similarityThreshold, fusionFrames, cancellationToken);
-        }
-
-        /// <summary>
-        /// 处理 H265 视频流识别请求：融合整段流后返回单个识别结果
-        /// </summary>
-        public static async Task<FaceRecognition?> HandleH265StreamAsync(
-            FaceGroupService faceGroupService,
-            HttpContext context,
-            DetectService detectService,
-            ILogger<Program> logger,
-            string groupId,
-            double frameIntervalSeconds = 0.5,
-            float similarityThreshold = SimilarityThreshold,
-            int fusionFrames = 30,
-            CancellationToken cancellationToken = default)
-        {
-            return await RecognizeAsync(
-                faceGroupService, context.Request, detectService, logger, groupId,
-                VideoCodec.H265, frameIntervalSeconds, similarityThreshold, fusionFrames, cancellationToken);
+                frameIntervalSeconds, similarityThreshold, fusionFrames, cancellationToken);
         }
 
         private static async Task<FaceRecognition?> RecognizeAsync(
@@ -66,14 +47,13 @@ namespace FaceFeature.Handlers
             DetectService detectService,
             ILogger<Program> logger,
             string groupId,
-            VideoCodec codec,
             double frameIntervalSeconds,
             float similarityThreshold,
             int fusionFrames,
             CancellationToken cancellationToken)
         {
             var persons = await faceGroupService.GetPersonsAsync(groupId, cancellationToken);
-            var frames = detectService.DetectFramesAsync(request.Body, codec, frameIntervalSeconds, cancellationToken);
+            var frames = detectService.DetectFramesAsync(request.Body, frameIntervalSeconds, cancellationToken);
 
             var fused = await FaceVideoFusion.FuseAsync(
                 frames, fusionFrames > 0 ? fusionFrames : int.MaxValue, cancellationToken);
