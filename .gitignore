@@ -377,3 +377,5 @@ FodyWeavers.xsd
 /FaceFeature/tools/ffmpeg
 /FaceFeature/tools/ffmpeg.exe
 /FaceFeature/datas/
+/ReidFeature/datas
+MediaDownloader/appsettings.Development.json

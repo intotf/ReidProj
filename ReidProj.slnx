@@ -2,4 +2,5 @@
   <Project Path="ReidFeature/ReidFeature.csproj" />
   <Project Path="FaceFeature/FaceFeature.csproj" />
   <Project Path="ReidSample/ReIdSample.csproj" />
+  <Project Path="FamilyDiscern/FamilyDiscern.csproj" />
 </Solution>
