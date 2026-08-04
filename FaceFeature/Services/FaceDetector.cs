@@ -17,17 +17,29 @@ namespace FaceFeature.Services;
 /// </summary>
 public sealed class FaceDetector : IDisposable
 {
+    // ─── 模型常量 ─────────────────────────────────────────────
+
     /// <summary>SCRFD 模型期望的输入图像尺寸（宽高均为 640）</summary>
     private const int InputSize = 640;
 
-    /// <summary>NMS 去重的 IoU 阈值</summary>
-    private const float NmsThreshold = 0.4f;
+    /// <summary>特征金字塔层数（det_10g 固定 3 层）</summary>
+    private const int Fmc = 3;
+
+    /// <summary>每像素锚点数（det_10g 固定 2）</summary>
+    private const int NumAnchors = 2;
+
+    /// <summary>各特征图的下采样步长（det_10g 固定 [8, 16, 32]）</summary>
+    private static readonly int[] Strides = [8, 16, 32];
+
+    // ─── 解码常量 ─────────────────────────────────────────────
 
     /// <summary>人脸置信度过滤阈值</summary>
     private const float ConfidenceThreshold = 0.6f;
 
     /// <summary>人脸最小尺寸（像素），低于此值的人脸特征不可靠，将被忽略</summary>
     private const int MinFaceSize = 50;
+
+    // ─── 预处理常量（SCRFD 归一化）───────────────────────────
 
     /// <summary>SCRFD 预处理的像素均值</summary>
     private const float ScrfdMean = 127.5f;
@@ -49,16 +61,6 @@ public sealed class FaceDetector : IDisposable
     /// <summary>ONNX Runtime 推理会话</summary>
     private readonly InferenceSession _session;
 
-
-    /// <summary>特征金字塔的层数（det_10g 固定 3 层）</summary>
-    private const int Fmc = 3;
-
-    /// <summary>每像素锚点数（det_10g 固定 2）</summary>
-    private const int NumAnchors = 2;
-
-    /// <summary>各特征图的下采样步长（det_10g 固定 [8, 16, 32]）</summary>
-    private static readonly int[] Strides = [8, 16, 32];
-
     /// <summary>
     /// 初始化 SCRFD 人脸检测器
     /// </summary>
@@ -68,19 +70,7 @@ public sealed class FaceDetector : IDisposable
     public FaceDetector(ILogger<FaceDetector> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
-
-        // 搜索模型文件路径（输出目录 → 项目目录）
-        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "det_10g.onnx");
-        if (!File.Exists(modelPath))
-        {
-            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "det_10g.onnx");
-        }
-        if (!File.Exists(modelPath))
-        {
-            throw new FileNotFoundException("请先将 det_10g.onnx 放到 models/ 目录下", modelPath);
-        }
-
-        _session = new InferenceSession(modelPath, onnxOptions.Value.Face);
+        _session = new InferenceSession(FindModelPath(), onnxOptions.Value.Face);
 
         // det_10g（buffalo_l）固定布局：9 个输出（3 层 score / bbox / 5 关键点），channels-last。
         // 更换模型时需同步调整 Fmc / NumAnchors / Strides 与解码逻辑。
@@ -91,12 +81,27 @@ public sealed class FaceDetector : IDisposable
         }
     }
 
+    /// <summary>在输出目录 → 项目目录中定位模型文件</summary>
+    private static string FindModelPath()
+    {
+        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "det_10g.onnx");
+        if (!File.Exists(modelPath))
+        {
+            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "det_10g.onnx");
+        }
+        if (!File.Exists(modelPath))
+        {
+            throw new FileNotFoundException("请先将 det_10g.onnx 放到 models/ 目录下", modelPath);
+        }
+        return modelPath;
+    }
+
     /// <summary>
-    /// 检测图像中的所有人脸
+    /// 检测图像中置信度最高的可用人脸（性能优先——单趟扫描，不构建全量候选列表）
     /// </summary>
     /// <param name="image">输入 RGB 图像</param>
-    /// <returns>人脸边界框列表（坐标相对于原图），无人脸时返回空列表</returns>
-    private List<FaceBox> DetectAll(Image<Rgb24> image)
+    /// <returns>置信度最高的单人脸（含关键点），无人脸时返回 null</returns>
+    public FaceBox? DetectBest(Image<Rgb24> image)
     {
         var sw = Stopwatch.StartNew();
 
@@ -114,63 +119,39 @@ public sealed class FaceDetector : IDisposable
             FillTensorLetterbox(image, scale, padX, padY, buffer.AsMemory(0, tensorSize));
 
             var inputName = _session.InputMetadata.Keys.First();
-            var input = NamedOnnxValue.CreateFromTensor(inputName,
+            var input = NamedOnnxValue.CreateFromTensor(
+                inputName,
                 new DenseTensor<float>(buffer.AsMemory(0, tensorSize), [1, 3, InputSize, InputSize]));
-
             using var results = _session.Run([input]);
 
-            var candidates = new List<Candidate>(capacity: 200);
+            // 只保留置信度最高的候选，无需构建全量列表与 NMS
+            Candidate? best = null;
             for (int level = 0; level < Fmc; level++)
             {
                 int stride = Strides[level];
                 int fmSize = InputSize / stride;
+
+                var scores = ((DenseTensor<float>)results[level].AsTensor<float>()).Buffer.Span;
+                var bboxes = ((DenseTensor<float>)results[Fmc + level].AsTensor<float>()).Buffer.Span;
+                var kpss = ((DenseTensor<float>)results[2 * Fmc + level].AsTensor<float>()).Buffer.Span;
+
                 DecodeLevel(
-                    ((DenseTensor<float>)results[level].AsTensor<float>()).Buffer.Span,
-                    ((DenseTensor<float>)results[Fmc + level].AsTensor<float>()).Buffer.Span,
-                    ((DenseTensor<float>)results[2 * Fmc + level].AsTensor<float>()).Buffer.Span,
+                    scores, bboxes, kpss,
                     stride, NumAnchors, fmSize,
                     scale, padX, padY, image.Width, image.Height,
-                    candidates);
+                    ref best);
             }
 
-            var detections = Nms(candidates);
-            // 过滤太小的人脸（特征不可靠）
-            detections.RemoveAll(d => d.Bbox.Width < MinFaceSize || d.Bbox.Height < MinFaceSize);
-            Log.FaceDetectionCompleted(_logger, detections.Count, sw.Elapsed.TotalMilliseconds);
-            return detections;
+            var face = best is { } c
+                ? new FaceBox(new Rectangle((int)c.X, (int)c.Y, (int)c.W, (int)c.H), c.Score, c.Keypoints)
+                : null;
+            Log.FaceDetectionCompleted(_logger, face is null ? 0 : 1, sw.Elapsed.TotalMilliseconds);
+            return face;
         }
         finally
         {
             ArrayPool<float>.Shared.Return(buffer);
         }
-    }
-
-    /// <summary>
-    /// 检测图像中面积最大且置信度超过阈值的最佳人脸（性能优先——避免全量特征提取）
-    /// </summary>
-    /// <param name="image">输入 RGB 图像</param>
-    /// <returns>面积最大的单人脸（含关键点），无人脸时返回 null</returns>
-    public FaceBox? DetectBest(Image<Rgb24> image)
-    {
-        var detections = DetectAll(image);
-        if (detections.Count == 0)
-        {
-            return null;
-        }
-
-        FaceBox? best = null;
-        int bestArea = -1;
-        foreach (var d in detections)
-        {
-            int area = d.Bbox.Width * d.Bbox.Height;
-            if (area > bestArea)
-            {
-                bestArea = area;
-                best = d;
-            }
-        }
-
-        return best;
     }
 
     /// <summary>
@@ -185,7 +166,7 @@ public sealed class FaceDetector : IDisposable
     /// <remarks>
     /// 归一化公式: output = (pixel - 127.5) / 128.0
     /// 输出为 CHW 连续内存布局，三个平面依次为 R→G→B 通道；letterbox 区域填黑（归一化后为 BlackNorm）。
-    /// 坐标映射与 DetectAll 的逆映射一致：(src = (out - pad) / scale)，保证检测框映射回原图无偏移。
+    /// 坐标映射与 DetectBest 的逆映射一致：(src = (out - pad) / scale)，保证检测框映射回原图无偏移。
     /// </remarks>
     /// <param name="image">源图像（任意分辨率）</param>
     /// <param name="scale">letterbox 缩放比例</param>
@@ -280,13 +261,13 @@ public sealed class FaceDetector : IDisposable
     /// <param name="padY">letterbox 垂直填充量</param>
     /// <param name="imgW">原图宽度</param>
     /// <param name="imgH">原图高度</param>
-    /// <param name="candidates">候选框输出列表</param>
+    /// <param name="best">当前置信度最高的候选框（尚未找到时为 null）</param>
     private static void DecodeLevel(
         ReadOnlySpan<float> scores, ReadOnlySpan<float> bboxes, ReadOnlySpan<float> kpss,
         int stride, int numAnchors, int fmSize,
         float scale, float padX, float padY,
         int imgW, int imgH,
-        List<Candidate> candidates)
+        ref Candidate? best)
     {
         int total = fmSize * fmSize * numAnchors;
 
@@ -324,74 +305,27 @@ public sealed class FaceDetector : IDisposable
 
             float w = x2 - x1;
             float h = y2 - y1;
-            if (w > 0 && h > 0)
-            {
-                var kps = new PointF[5];
-                int kpsOffset = i * 10;
-                for (int k = 0; k < 5; k++)
-                {
-                    float kx = (anchorX + kpss[kpsOffset + 2 * k] * stride - padX) / scale;
-                    float ky = (anchorY + kpss[kpsOffset + 2 * k + 1] * stride - padY) / scale;
-                    kps[k] = new PointF(Math.Clamp(kx, 0f, imgW), Math.Clamp(ky, 0f, imgH));
-                }
-                candidates.Add(new Candidate(x1, y1, w, h, score, kps));
-            }
-        }
-    }
-
-    // ─── NMS ──────────────────────────────────────────────────
-
-    private static List<FaceBox> Nms(List<Candidate> cs)
-    {
-        var result = new List<FaceBox>();
-        if (cs.Count == 0)
-        {
-            return result;
-        }
-
-        cs.Sort((a, b) => b.Score.CompareTo(a.Score));
-
-        int n = cs.Count;
-        var suppressed = new bool[n];
-
-        for (int i = 0; i < n; i++)
-        {
-            if (suppressed[i])
+            if (w < MinFaceSize || h < MinFaceSize)
             {
                 continue;
             }
-            var c = cs[i];
-            result.Add(new FaceBox(new Rectangle((int)c.X, (int)c.Y, (int)c.W, (int)c.H), c.Score, c.Keypoints));
 
-            float areaI = c.W * c.H;
-            for (int j = i + 1; j < n; j++)
+            if (best is not null && score <= best.Value.Score)
             {
-                if (suppressed[j])
-                {
-                    continue;
-                }
-                var d = cs[j];
-
-                float ix = Math.Max(c.X, d.X);
-                float iy = Math.Max(c.Y, d.Y);
-                float iw = Math.Min(c.X + c.W, d.X + d.W) - ix;
-                float ih = Math.Min(c.Y + c.H, d.Y + d.H) - iy;
-
-                if (iw <= 0 || ih <= 0)
-                {
-                    continue;
-                }
-
-                float inter = iw * ih;
-                float iou = inter / (areaI + d.W * d.H - inter);
-                if (iou > NmsThreshold)
-                {
-                    suppressed[j] = true;
-                }
+                continue;
             }
-        }
 
-        return result;
+            var kps = new PointF[5];
+            int kpsOffset = i * 10;
+            for (int k = 0; k < 5; k++)
+            {
+                float kx = (anchorX + kpss[kpsOffset + 2 * k] * stride - padX) / scale;
+                float ky = (anchorY + kpss[kpsOffset + 2 * k + 1] * stride - padY) / scale;
+                kps[k] = new PointF(Math.Clamp(kx, 0f, imgW), Math.Clamp(ky, 0f, imgH));
+            }
+
+            best = new Candidate(x1, y1, w, h, score, kps);
+        }
     }
 
     /// <summary>
@@ -403,10 +337,5 @@ public sealed class FaceDetector : IDisposable
     /// <param name="H">高度</param>
     /// <param name="Score">人脸置信度</param>
     /// <param name="Keypoints">5 个关键点（原图坐标）</param>
-    private readonly record struct Candidate(float X, float Y, float W, float H, float Score, PointF[] Keypoints)
-        : IComparable<Candidate>
-    {
-        /// <summary>按置信度降序比较（用于 NMS 排序）</summary>
-        public int CompareTo(Candidate other) => other.Score.CompareTo(Score);
-    }
+    private readonly record struct Candidate(float X, float Y, float W, float H, float Score, PointF[] Keypoints);
 }

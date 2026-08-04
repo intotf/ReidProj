@@ -39,7 +39,7 @@ public static class DetectHandler
     }
 
     /// <summary>
-    /// 处理图像检测请求：上传 JPEG/PNG 等静态图片，解码后检测面积最大的最佳人脸
+    /// 处理图像检测请求：上传 JPEG/PNG 等静态图片，解码后检测置信度最高的最佳人脸
     /// </summary>
     /// <param name="context">HTTP 上下文</param>
     /// <param name="detectService">检测编排服务</param>
