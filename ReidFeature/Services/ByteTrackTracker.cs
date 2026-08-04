@@ -220,7 +220,9 @@ public sealed class ByteTrackTracker
 
             for (int j = 0; j < detections.Length; j++)
             {
-                if (matchedDetIndices.Contains(j))
+                // matchedDetIndices 存放的是原始检测索引（detections[j].Idx），
+                // 必须按原始索引判重，不能按列表内位置 j 判重（二者通常不一致）。
+                if (matchedDetIndices.Contains(detections[j].Idx))
                 {
                     continue;
                 }
