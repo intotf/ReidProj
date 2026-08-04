@@ -20,15 +20,6 @@ static partial class Log
     [LoggerMessage(Level = LogLevel.Information, Message = "YOLO 检测: {Cnt} 人, 耗时 {Elapsed:F1}ms")]
     public static partial void YoloDetectionCompleted(ILogger logger, int cnt, double elapsed);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "人脸检测: {Cnt} 个, 耗时 {Elapsed:F1}ms")]
-    public static partial void FaceDetectionCompleted(ILogger logger, int cnt, double elapsed);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "最佳人脸: score={Score:F3}, 耗时 {Elapsed:F1}ms")]
-    public static partial void BestFaceDetected(ILogger logger, float score, double elapsed);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "未检测到最佳人脸, 耗时 {Elapsed:F1}ms")]
-    public static partial void BestFaceNotFound(ILogger logger, double elapsed);
-
     [LoggerMessage(Level = LogLevel.Information, Message = "视频帧 #{FrameNo} 解码完成, 格式: {Codec}, 累计耗时 {Elapsed:F1}ms")]
     public static partial void VideoDecodeCompleted(ILogger logger, string codec, int frameNo, double elapsed);
 
@@ -38,6 +29,15 @@ static partial class Log
     [LoggerMessage(Level = LogLevel.Error, Message = "检测管线异常")]
     public static partial void DetectPipelineFailed(ILogger logger, Exception exception);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "人脸特征: dim={Dim}, 耗时 {Elapsed:F1}ms")]
-    public static partial void FaceFeatureExtracted(ILogger logger, long dim, double elapsed);
+    [LoggerMessage(Level = LogLevel.Information, Message = "姿态估计: 17 点, 耗时 {Elapsed:F1}ms")]
+    public static partial void PoseEstimated(ILogger logger, double elapsed);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Track 融合: Track#{TrackId}, {FrameCount} 帧, 耗时 {Elapsed:F1}ms")]
+    public static partial void TrackFusionCompleted(ILogger logger, int trackId, int frameCount, double elapsed);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Gallery 注册: 成员 {MemberName}, group={GroupId}")]
+    public static partial void GalleryMemberEnrolled(ILogger logger, string memberName, string groupId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "识别结果: {MemberName}, score={Score:F3}, track={TrackId}")]
+    public static partial void RecognitionResult(ILogger logger, string memberName, float score, int trackId);
 }

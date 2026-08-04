@@ -1,14 +1,15 @@
 using ReidFeature.Payloads;
+using ReidFeature.Services;
 using System.Text.Json.Serialization;
 
 namespace ReidFeature
 {
-    [JsonSerializable(typeof(IAsyncEnumerable<PersonDetection>))]
-    [JsonSerializable(typeof(DetectionFlags))]
-    [JsonSerializable(typeof(UrlDetectRequest))]
-    [JsonSerializable(typeof(Person[]))]
-    [JsonSerializable(typeof(Dictionary<string, byte[]>))]
-    [JsonSerializable(typeof(IAsyncEnumerable<PersonRecognition>))]
+    [JsonSerializable(typeof(List<PersonDetection>))]
+    [JsonSerializable(typeof(PersonRecognition))]
+    [JsonSerializable(typeof(EnrollResult))]
+    [JsonSerializable(typeof(MemberInfo[]))]
+    [JsonSerializable(typeof(double))]
+    [JsonSerializable(typeof(FamilyGalleryService.GalleryData))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
 

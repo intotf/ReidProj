@@ -19,7 +19,7 @@ static class VideoDecoder
     /// <param name="videoStream">H264 或 H265 裸流数据流</param>
     /// <param name="codec">视频编码格式（H264 / H265）</param>
     /// <param name="logger">日志记录器</param>
-    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 5 表示每 5 秒一帧</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 5 表示每 5 秒一帧，0.5 表示每 0.5 秒一帧</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>解码后的 RGB 图像流，无更多帧时结束</returns>
     /// <exception cref="InvalidDataException">视频流数据不完整或格式异常</exception>
@@ -27,7 +27,7 @@ static class VideoDecoder
         Stream videoStream,
         VideoCodec codec,
         ILogger logger,
-        int frameIntervalSeconds,
+        double frameIntervalSeconds,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
@@ -90,7 +90,7 @@ static class VideoDecoder
     /// <summary>
     /// 启动 ffmpeg 进程（仅启动，不写 stdin）
     /// </summary>
-    private static Process StartFfmpegProcess(VideoCodec codec, int frameIntervalSeconds)
+    private static Process StartFfmpegProcess(VideoCodec codec, double frameIntervalSeconds)
     {
         var ffmpegFileName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
         var ffmpegPath = Path.Combine(AppContext.BaseDirectory, "tools", ffmpegFileName);
@@ -119,8 +119,12 @@ static class VideoDecoder
 
         if (frameIntervalSeconds > 0)
         {
-            startInfo.ArgumentList.Add("-r");
-            startInfo.ArgumentList.Add((1d / frameIntervalSeconds).ToString("F6"));
+            double rate = 1d / frameIntervalSeconds;
+            if (double.IsFinite(rate) && rate > 0)
+            {
+                startInfo.ArgumentList.Add("-r");
+                startInfo.ArgumentList.Add(rate.ToString("F6"));
+            }
         }
 
         startInfo.ArgumentList.Add("-y");

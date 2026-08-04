@@ -4,9 +4,6 @@ namespace ReIdSample.Models.Dtos;
 
 public class ReidPersonDetection
 {
-    [JsonPropertyName("frameIndex")]
-    public int FrameIndex { get; set; }
-
     [JsonPropertyName("bbox")]
     public ReidBoundingBox Bbox { get; set; } = null!;
 

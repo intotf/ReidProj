@@ -55,10 +55,10 @@ public class ReidFeatureClient
     /// 上传 H264 裸流进行检测（POST /detect/h264stream）
     /// </summary>
     /// <param name="h264Stream">H264 裸流数据流</param>
-    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 5 表示每 5 秒一帧</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 5 表示每 5 秒一帧，0.5 表示每 0.5 秒一帧</param>
     /// <param name="flags">检测功能标志位</param>
     /// <param name="ct">取消令牌</param>
-    public async IAsyncEnumerable<ReidPersonDetection> HandleH264Async(Stream h264Stream, int frameIntervalSeconds, DetectionFlags? flags = null, [EnumeratorCancellation] CancellationToken ct = default)
+    public async IAsyncEnumerable<ReidPersonDetection> HandleH264Async(Stream h264Stream, double frameIntervalSeconds, DetectionFlags? flags = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
         using var content = new StreamContent(h264Stream);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
@@ -88,7 +88,7 @@ public class ReidFeatureClient
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
     /// <param name="flags">检测功能标志位</param>
     /// <param name="ct">取消令牌</param>
-    public async IAsyncEnumerable<ReidPersonDetection> HandleH265Async(Stream h265Stream, int frameIntervalSeconds, DetectionFlags? flags = null, [EnumeratorCancellation] CancellationToken ct = default)
+    public async IAsyncEnumerable<ReidPersonDetection> HandleH265Async(Stream h265Stream, double frameIntervalSeconds, DetectionFlags? flags = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
         using var content = new StreamContent(h265Stream);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
@@ -111,7 +111,7 @@ public class ReidFeatureClient
         _logger.LogInformation("ReidFeature H265 检测完成: {Count} 个人物", count);
     }
 
-    private static string BuildUrl(string basePath, DetectionFlags? flags, int? frameIntervalSeconds = null)
+    private static string BuildUrl(string basePath, DetectionFlags? flags, double? frameIntervalSeconds = null)
     {
         var query = new List<string>();
         if (flags.HasValue)

@@ -1,0 +1,295 @@
+# ReidFeature
+
+基于 ASP.NET Core Minimal API 的人物重识别 (Person Re-Identification) 微服务。接收 H264/H265 视频裸流，对其中的人物进行检测、跟踪、特征提取，并通过四维融合算法实现家庭成员识别。
+
+## 核心功能
+
+- **人物检测** — 输入视频流，输出检测到的人物及其四维特征包
+- **人物识别** — 输入视频流 + Gallery 对比，输出最佳匹配的家庭成员（或判定为陌生人）
+- **成员注册** — 上传视频注册新成员特征到 Gallery
+- **成员管理** — 删除成员、列出分组成员
+
+## API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/detect/h264stream` | H264 视频流人物检测 |
+| POST | `/detect/h265stream` | H265 视频流人物检测 |
+| POST | `/recognize/h264stream/{groupId}` | H264 视频流人物识别 |
+| POST | `/recognize/h265stream/{groupId}` | H265 视频流人物识别 |
+| POST | `/family/enroll/h264/{groupId}/{memberName}` | H264 视频注册成员 |
+| POST | `/family/enroll/h265/{groupId}/{memberName}` | H265 视频注册成员 |
+| DELETE | `/family/{groupId}/{memberId}` | 删除成员 |
+| GET | `/family/{groupId}` | 列出分组成员 |
+
+请求体格式为 `application/octet-stream`（视频裸流），最大 20MB。
+
+## 技术架构
+
+### AI/ML 推理管线（全 ONNX Runtime，纯 CPU）
+
+| 模型文件 | 用途 | 输入尺寸 | 备注 |
+|----------|------|----------|------|
+| `yolo11n.onnx` | YOLOv11n 人物检测 + NMS | 640×640 | 本项目核心 |
+| `reid_model.onnx` | FastReID ResNet50-IBN-a 特征提取 | 128×256 | 全身/头肩两种裁剪模式 |
+| `movenet_lightning.onnx` | MoveNet Lightning 17 关键点姿态估计 | 192×192 | 计算体型标量 |
+| `scrfd_10g.onnx` | SCRFD-10g 人脸检测 | 640×640 | FaceFeature 项目使用，共享部署 |
+| `w600k_r50.onnx` | ArcFace 人脸特征提取 (512-d) | 112×112 | FaceFeature 项目使用，共享部署 |
+
+### 四维特征融合
+
+传统 ReID 仅依赖全身外观特征，换衣后准确率大幅下降。本系统融合四个互补维度，使识别在换衣、光线变化等场景下保持鲁棒。
+
+#### 四个维度
+
+| 维度 | 默认权重 | 模型来源 | 特征内容 | 换衣鲁棒性 |
+|------|----------|----------|----------|------------|
+| 全身 ReID (Cloth) | 0.20 | FastReID ResNet50-IBN-a | 2048-d L2 归一化向量，从完整 bbox 裁剪提取 | ❌ 衣着敏感 |
+| 头肩 ReID (Head) | 0.30 | FastReID（同一模型，bbox 上部 38% 裁剪） | 2048-d L2 归一化向量，仅包含头发/脸型/肩部轮廓 | ✅ 较鲁棒 |
+| 体型标量 (Body) | 0.30 | MoveNet Lightning 17 关键点 | float[2] = [头身比, 肩髋比] | ✅ 衣着无关 |
+| 步态标量 (Gait) | 0.20 | ByteTrack 轨迹中心点序列 | float[2] = [步频 Hz, 水平摆幅 px] | ✅ 衣着无关 |
+
+#### 处理流程
+
+```
+┌──────────────┐       ┌──────────────┐       ┌──────────────────┐
+│ HTTP Request │──────▶│ VideoDecoder │──────▶│  YoloDetector    │
+│ H264/H265 流 │       │  ffmpeg pipe │       │  逐帧检测人框    │
+└──────────────┘       └──────────────┘       └────────┬─────────┘
+                                                       │
+                                              List<(bbox, conf)>
+                                                       ▼
+                                              ┌──────────────────┐
+                                              │  ByteTrack       │
+                                              │  Tracker         │
+                                              │  串联成 Track    │
+                                              └────────┬─────────┘
+                                                       │
+                                            (trackId, bbox) per frame
+                                                       ▼
+                                              ┌──────────────────┐
+                                              │ 按 Track 聚合缓存 │
+                                              │ Track_A: [f0…fN] │
+                                              │ Track_B: [f0…fN] │
+                                              └────────┬─────────┘
+                                                       │
+                                                每个 Track 所有帧
+                                                       ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  TrackFusionService                                                  │
+│                                                                      │
+│  对每帧并行提取:                                                      │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐  │
+│  │ ReIdExtractor   │  │ ReIdExtractor   │  │ PoseEstimator       │  │
+│  │ CropType.Full   │  │ CropType.Head   │  │ MoveNet ONNX       │  │
+│  │ Body            │  │ Shoulder(38%)   │  │                     │  │
+│  │ → vec_cloth     │  │ → vec_head      │  │ → bodySignals       │  │
+│  │ 2048-d float[]  │  │ 2048-d float[]  │  │ [头身比, 肩髋比]    │  │
+│  └────────┬────────┘  └────────┬────────┘  └──────────┬──────────┘  │
+│           │                    │                       │             │
+│           ▼                    ▼                       ▼             │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │ ByteTrack 轨迹中心点序列 → gaitSignals (步频 + 摆幅)        │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+│                                │                                     │
+│                                ▼                                     │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │ 质量加权融合 (按框大小 × 置信度) → TrackFeaturePack          │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  FamilyGalleryService (识别匹配)                                     │
+│                                                                      │
+│  Score = 0.20×cos(Vc) + 0.30×cos(Vh) + 0.30×sim(Sb) + 0.20×sim(Sg) │
+│                                                                      │
+│  对所有 Gallery 成员计算融合分数                                       │
+│  ┌───────────────────────────────────────────────────────────────┐   │
+│  │ maxScore > 0.62 && (maxScore - secondScore) > 0.08            │   │
+│  │   → 命中: 返回成员名 + 分数 + EMA 更新 Gallery                │   │
+│  │ 否则 → "stranger"                                             │   │
+│  └───────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+其中相似度函数：
+- `cos(Vc)` / `cos(Vh)`：余弦相似度（ReID 向量已 L2 归一化，dot product 即为余弦值）
+- `sim(Sb)` / `sim(Sg)`：逆欧氏距离 `1 / (1 + dist)`，将标量距离映射到 [0, 1]
+
+#### 体型标量计算细节
+
+基于 MoveNet Lightning 输出的 17 个 COCO 关键点（置信度 > 0.3 才使用）：
+
+- **头身比** = |鼻子Y − 髋中点Y| / |肩中点Y − 髋中点Y|（反映头部相对躯干的比例）
+- **肩髋比** = |左肩X − 右肩X| / |左髋X − 右髋X|（反映上下身宽度比例）
+
+这两个标量是人体骨骼结构决定的，不受衣着影响。
+
+#### 步态标量计算细节
+
+基于 ByteTrack 跟踪器记录的轨迹中心点序列（至少 3 个点）：
+
+- **步频** = Y 方向零交叉次数 / 2（垂直方向振荡频率，反映行走节奏）
+- **水平摆幅** = X 坐标的标准差（反映行走时身体左右晃动幅度）
+
+#### Gallery EMA 更新
+
+重复注册同一成员时，新旧特征按 EMA 融合（λ=0.3），让 Gallery 特征随时间自适应：
+
+```
+new_vec = old_vec × (1-λ) + latest_vec × λ → L2 归一化
+```
+
+### 多目标跟踪
+
+- ByteTrack 纯 C# 实现：8 维卡尔曼滤波器 + 匈牙利算法线性分配 + IoU 级联匹配
+- 高/低分两轮关联，轨迹丢失容忍机制
+
+### 视频处理
+
+- 嵌入式 ffmpeg 进程 pipe 模式解码 H264/H265 裸流，不落地文件
+- 支持按时间间隔抽帧（默认每 0.5 秒一帧）
+
+### 识别判决逻辑
+
+- 最佳四维融合分 > **0.62** 且与次高分差距 > **0.08** → 命中
+- 否则返回 "stranger"
+
+## 工程特点
+
+- **Native AOT** — `PublishAot=true`，Clang 编译为原生可执行文件，启动快、无 JIT
+- **.NET 10** — 使用最新框架
+- **Source-generated JSON** — AOT 兼容的序列化
+- **Gallery 持久化** — JSON 文件存储 + EMA (λ=0.3) 增量更新特征
+- **质量加权融合** — 按 bbox 面积 × 置信度加权，取 Top-5 帧
+- **Parallel 特征提取** — 对选中帧并行执行 ReID + 姿态估计
+- **ArrayPool 复用** — 图像 tensor 使用 `ArrayPool<float>` 减少 GC 压力
+- **TensorPrimitives** — SIMD 加速的向量运算
+
+## 项目结构
+
+```
+ReidFeature/
+├── Handlers/           # API 处理器（Detect / Recognize / Enrollment）
+├── Services/           # 业务服务
+│   ├── YoloDetector        # YOLOv11n 人物检测
+│   ├── ReIdExtractor       # FastReID 特征提取（全身 + 头肩）
+│   ├── PoseEstimator       # MoveNet 姿态估计 + 体型标量
+│   ├── ByteTrackTracker    # 多目标跟踪器
+│   ├── TrackFusionService  # Track 内四维特征融合
+│   ├── DetectService       # 检测编排（YOLO → ByteTrack → Fusion）
+│   └── FamilyGalleryService # 家庭成员 Gallery 管理
+├── Payloads/           # 数据模型（DTO / Record）
+├── Helpers/            # 辅助工具（VideoDecoder / Log）
+├── models/             # ONNX 模型文件（需手动准备）
+├── tools/              # ffmpeg 二进制
+├── datas/              # Gallery 持久化 + 启动注册数据
+└── scripts/            # 模型导出脚本
+```
+
+## 快速开始
+
+### 前置条件
+
+- .NET 10 SDK
+- ffmpeg 二进制放置于 `tools/` 目录
+- ONNX 模型文件放置于 `models/` 目录：
+  - `yolo11n.onnx` — YOLOv11n 人物检测
+  - `reid_model.onnx` — FastReID 特征提取
+  - `movenet_lightning.onnx` — MoveNet 姿态估计
+  - `scrfd_10g.onnx` — SCRFD 人脸检测（FaceFeature 项目共享）
+  - `w600k_r50.onnx` — ArcFace 人脸特征提取（FaceFeature 项目共享）
+
+运行 `scripts/setup_models.py` 可自动导出/下载模型（详见下方「模型准备」章节）。
+
+### 运行
+
+```bash
+dotnet run
+```
+
+服务默认监听 `http://*:9000`，Swagger UI 位于根路径 `/swagger`。
+
+### 发布
+
+```bash
+dotnet publish -c Release
+```
+
+生成 Native AOT 原生可执行文件（win-x64）。
+
+## 配置
+
+### 模型准备
+
+项目提供 `scripts/setup_models.py`，一键完成 3 个核心模型的下载与 ONNX 导出：
+
+```bash
+cd ReidFeature
+python scripts/setup_models.py
+```
+
+支持按需跳过：
+
+```bash
+python scripts/setup_models.py --skip-yolo      # 跳过 YOLO
+python scripts/setup_models.py --skip-reid      # 跳过 ReID
+python scripts/setup_models.py --skip-pose      # 跳过 MoveNet
+```
+
+#### 各模型导出流程
+
+| 模型 | 来源 | 导出方式 | 产物 |
+|------|------|----------|------|
+| YOLOv11n | Ultralytics 官方权重 | `pip install ultralytics` → `model.export(format="onnx")` | `models/yolo11n.onnx` |
+| FastReID | JDAI-CV/fast-reid + Market1501 预训练权重 | Git clone → PyTorch 构建 → ONNX 导出 | `models/reid_model.onnx` |
+| MoveNet Lightning | PINTO Model Zoo (Wasabi S3) | 直接下载预转换的 ONNX v4 | `models/movenet_lightning.onnx` |
+
+#### FastReID 导出细节
+
+FastReID 的导出是最复杂的步骤，脚本会：
+
+1. 克隆 `https://github.com/JDAI-CV/fast-reid`（shallow clone）
+2. 安装 PyTorch + fastreid 依赖
+3. 使用 `Market1501/bagtricks_R50-ibn.yml` 配置构建 ResNet50-IBN-a
+4. 下载 Market1501 预训练权重 `market_bot_R50-ibn.pth`
+5. 用 `ONNXWrapper` 将以下操作内嵌到 ONNX 图中：
+   - ImageNet mean/std 归一化（C# 端只需传 [0,1] 像素值）
+   - GlobalAvgPool + Squeeze
+   - L2 归一化
+6. 导出后合并外部数据文件（PyTorch 2.x 可能拆分为 `.onnx` + `.onnx.data`）
+7. 使用 `onnxoptimizer` 做常量折叠优化（可选）
+
+最终模型：输入 `[B, 3, 256, 128]` → 输出 `[B, 2048]` L2 归一化特征向量。
+
+#### 脚本特点
+
+- **幂等执行** — 模型文件已存在时自动跳过，可重复运行
+- **自包含** — 按需 pip install 依赖，不要求预装任何 ML 库
+- **单文件产出** — 处理 PyTorch 导出可能产生的外部权重文件，确保每个模型为单一 `.onnx`
+- **错误即停** — 任一步骤失败立即退出，不会产出损坏的模型
+
+#### 关于共享模型
+
+`models/` 目录中的 `scrfd_10g.onnx` 和 `w600k_r50.onnx` 属于 FaceFeature 项目，不由本脚本管理。如需准备这两个模型，请参考 FaceFeature 项目或从 [InsightFace buffalo_l 模型包](https://github.com/deepinsight/insightface/tree/master/model_zoo) 手动获取。
+
+### ONNX Runtime 线程配置
+
+### ONNX Runtime 线程配置
+
+通过 `appsettings.json` 配置 ONNX Runtime 线程数：
+
+```json
+{
+  "Onnx": {
+    "Yolo": { "IntraOpNumThreads": 1, "InterOpNumThreads": 1 },
+    "ReId": { "IntraOpNumThreads": 0 },
+    "Pose": { "IntraOpNumThreads": 1 }
+  }
+}
+```
+
+## 启动自动注册
+
+将成员视频放置于 `datas/family/{成员名}/enroll.h264`（或 `.h265` / `.mp4`），服务启动时自动注册到 `default` 分组。
