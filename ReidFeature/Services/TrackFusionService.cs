@@ -296,12 +296,16 @@ public sealed class TrackFusionService
         // 水平摆幅：X 位置的标准差
         float meanX = 0f;
         for (int i = 0; i < centers.Length; i++)
+        {
             meanX += centers[i].X;
+        }
         meanX /= centers.Length;
 
         float varianceX = 0f;
         for (int i = 0; i < centers.Length; i++)
+        {
             varianceX += (centers[i].X - meanX) * (centers[i].X - meanX);
+        }
         varianceX /= centers.Length;
         float swingAmplitude = MathF.Sqrt(varianceX);
 

@@ -53,7 +53,7 @@ public sealed class DetectService : IDisposable
     {
         var detections = _yolo.DetectPersons(image);
         // 无论是否有检测都让 tracker 推进：无人帧触发丢失逻辑（LostFrames++ / HitStreak--）
-        var tracked = _tracker.Update(detections);
+        var tracked = _tracker.Update(CollectionsMarshal.AsSpan(detections));
         if (detections.Count == 0)
         {
             return;
@@ -62,7 +62,9 @@ public sealed class DetectService : IDisposable
         // 每帧构建一次 bbox→置信度 映射，避免循环内 O(n²) 线性查找
         var scoreByBbox = new Dictionary<Rectangle, float>(detections.Count);
         for (int i = 0; i < detections.Count; i++)
+        {
             scoreByBbox[detections[i].Bbox] = detections[i].Confidence;
+        }
 
         for (int i = 0; i < tracked.Count; i++)
         {
@@ -176,7 +178,9 @@ public sealed class DetectService : IDisposable
             {
                 // 无论融合成功与否都释放该 Track 的缓存帧，避免 Image 泄漏
                 foreach (var (frame, _, _) in frames)
+                {
                     frame.Dispose();
+                }
             }
         }
 

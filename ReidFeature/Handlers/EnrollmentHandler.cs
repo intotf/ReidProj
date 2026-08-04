@@ -114,8 +114,7 @@ public static class EnrollmentHandler
         var memberId = await familyProvider.EnrollAsync(
             groupId, memberName, bestTrack.FeaturePack, cancellationToken);
 
-        logger.LogInformation("成员 {Name} 注册成功，ID={Id}，Group={Group}",
-            memberName, memberId, groupId);
+        Log.MemberEnrolled(logger, memberName, memberId, groupId);
 
         return Results.Ok(new EnrollResult(memberId, memberName, groupId));
     }

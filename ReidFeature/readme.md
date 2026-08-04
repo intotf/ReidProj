@@ -38,18 +38,19 @@ ReidFeature/
 │   ├── RecognizeHandler.cs     #   识别端点
 │   └── EnrollmentHandler.cs    #   家庭成员注册端点
 ├── Services/                   # 核心服务
-│   ├── YoloDetector.cs         #   YOLOv11n 人物检测 + NMS
-│   ├── ByteTrackTracker.cs     #   ByteTrack 多目标跟踪器（纯 C#）
-│   ├── ReIdExtractor.cs        #   FastReID 特征提取（全身 / 头肩）
-│   ├── PoseEstimator.cs        #   MoveNet 姿态估计 → 体型标量
-│   ├── TrackFusionService.cs   #   Track 内四维特征融合
-│   ├── DetectService.cs        #   检测编排：解码 → 检测 → 跟踪 → 缓存
-│   ├── FamilyGalleryService.cs #   家庭成员 Gallery（持久化）
-│   └── IPersonGroupProvider.cs #   家庭成员提供者接口
+│   ├── YoloDetector.cs         #   YOLOv11n 人物检测 + NMS（Singleton）
+│   ├── ByteTrackTracker.cs     #   ByteTrack 多目标跟踪器（纯 C#，Scoped）
+│   ├── ReIdExtractor.cs        #   FastReID 特征提取（全身 / 头肩，Singleton）
+│   ├── PoseEstimator.cs        #   MoveNet 姿态估计 → 体型标量（Singleton）
+│   ├── TrackFusionService.cs   #   Track 内四维特征融合（Scoped）
+│   ├── DetectService.cs        #   检测编排：解码 → 检测 → 跟踪 → 缓存（Scoped）
+│   ├── FamilyGalleryService.cs #   家庭成员 Gallery（持久化，Singleton）
+│   └── IFamilyMemberProvider.cs #  家庭成员提供者接口
 ├── Helpers/
 │   ├── VideoDecoder.cs         # ffmpeg 管道流式解码
-│   └── BoundingBoxHelper.cs    # bbox Clamp 工具
-├── Payloads/                   # 请求/响应模型
+│   ├── BoundingBoxHelper.cs    # bbox Clamp 工具
+│   └── HungarianSolver.cs      # 匈牙利算法求解器（跟踪器内部使用）
+├── Payloads/                   # 请求/响应模型、枚举与数据模型（含 CropType / GalleryData / GalleryEntry）
 ├── models/                     # ONNX 模型（见下）
 ├── tools/                      # ffmpeg 二进制
 ├── datas/                      # 运行时数据目录（见下）

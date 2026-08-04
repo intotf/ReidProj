@@ -265,7 +265,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("Gallery 加载失败: {File}, {Error}", file, ex.Message);
+                Log.GalleryLoadFailed(_logger, file, ex.Message);
             }
         }
     }
@@ -296,20 +296,5 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
     public void Dispose()
     {
         _unknownQueue.Clear();
-    }
-
-    // ── 内部数据模型 ──
-
-    internal sealed class GalleryData
-    {
-        public List<GalleryEntry> Members { get; set; } = [];
-    }
-
-    internal sealed class GalleryEntry
-    {
-        public string Id { get; set; } = "";
-        public string Name { get; set; } = "";
-        public DateTime EnrolledAt { get; set; }
-        public TrackFeaturePack FeaturePack { get; set; } = new();
     }
 }
