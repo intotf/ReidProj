@@ -1,5 +1,5 @@
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
+using System.Text.Json.Serialization;
 
 namespace ReidFeature.Payloads;
 
@@ -10,19 +10,21 @@ namespace ReidFeature.Payloads;
 public sealed class TrackFeaturePack
 {
     /// <summary>全身 ReID 权重</summary>
-    public const float WCloth = 0.20f;
+    public const float WCloth = 0.30f;
     /// <summary>头肩 ReID 权重</summary>
-    public const float WHead = 0.30f;
+    public const float WHead = 0.40f;
     /// <summary>体型标量权重</summary>
-    public const float WBody = 0.30f;
+    public const float WBody = 0.20f;
     /// <summary>步态标量权重</summary>
-    public const float WGait = 0.20f;
+    public const float WGait = 0.10f;
 
-    /// <summary>全身 ReID 特征向量（ResNet50-IBN-a 2048-d L2 归一化）</summary>
-    public byte[] VecCloth { get; set; } = [];
+    /// <summary>全身 ReID 特征向量（ResNet50-IBN-a 2048-d L2 归一化，JSON 序列化为 base64）</summary>
+    [JsonConverter(typeof(FloatArrayBase64Converter))]
+    public float[] VecCloth { get; set; } = [];
 
-    /// <summary>头肩区域 ReID 特征向量（同一模型，仅裁剪区域不同）</summary>
-    public byte[] VecHead { get; set; } = [];
+    /// <summary>头肩区域 ReID 特征向量（同一模型，仅裁剪区域不同，JSON 序列化为 base64）</summary>
+    [JsonConverter(typeof(FloatArrayBase64Converter))]
+    public float[] VecHead { get; set; } = [];
 
     /// <summary>体型标量 [0]=头身比, [1]=肩髋比（来自 MoveNet 关键点，换衣不变）</summary>
     public float[] BodySignals { get; set; } = [0f, 0f];
@@ -32,7 +34,7 @@ public sealed class TrackFeaturePack
 
     /// <summary>
     /// 四维余弦融合 — 按权重加权计算两个特征包的相似度
-    /// 权重: 全身 ReID 0.20 + 头肩 ReID 0.30 + 体型标量 0.30 + 步态标量 0.20
+    /// 权重: 全身 ReID 0.30 + 头肩 ReID 0.40 + 体型标量 0.20 + 步态标量 0.10
     /// </summary>
     /// <param name="a">特征包 A</param>
     /// <param name="b">特征包 B</param>
@@ -65,18 +67,6 @@ public sealed class TrackFeaturePack
             CosineSimilarity(a.VecHead, b.VecHead),
             VectorSimilarity(a.BodySignals, b.BodySignals),
             VectorSimilarity(a.GaitSignals, b.GaitSignals));
-    }
-
-    private static float CosineSimilarity(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
-    {
-        if (a.Length == 0 || b.Length == 0 || a.Length != b.Length)
-        {
-            return 0f;
-        }
-
-        var vecA = MemoryMarshal.Cast<byte, float>(a);
-        var vecB = MemoryMarshal.Cast<byte, float>(b);
-        return CosineSimilarity(vecA, vecB);
     }
 
     private static float CosineSimilarity(ReadOnlySpan<float> a, ReadOnlySpan<float> b)

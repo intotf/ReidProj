@@ -8,7 +8,6 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace ReidFeature.Services;
 
@@ -57,7 +56,7 @@ public sealed class ReIdExtractor : IDisposable
     /// <param name="personRect">人物边界框（原图坐标）</param>
     /// <param name="cropType">裁剪类型：FullBody（全身）或 HeadShoulder（头肩）</param>
     /// <returns>L2 归一化的特征向量</returns>
-    public byte[] ExtractFeatures(Image<Rgb24> sourceImage, BoundingBox personRect, CropType cropType = CropType.FullBody)
+    public float[] ExtractFeatures(Image<Rgb24> sourceImage, BoundingBox personRect, CropType cropType = CropType.FullBody)
     {
         var sw = Stopwatch.StartNew();
 
@@ -115,7 +114,7 @@ public sealed class ReIdExtractor : IDisposable
             var resultTensor = (DenseTensor<float>)results[0].AsTensor<float>();
 
             Log.ReIdFeatureExtracted(_logger, resultTensor.Length, sw.Elapsed.TotalMilliseconds);
-            return MemoryMarshal.Cast<float, byte>(resultTensor.Buffer.Span).ToArray();
+            return resultTensor.Buffer.Span.ToArray();
         }
         finally
         {

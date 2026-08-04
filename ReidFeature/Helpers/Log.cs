@@ -52,6 +52,27 @@ static partial class Log
     [LoggerMessage(Level = LogLevel.Information, Message = "视频全部解码完成, 共 {TotalFrames} 帧, 格式: {Codec}, 总耗时 {Elapsed:F1}ms")]
     public static partial void VideoDecodeAllCompleted(ILogger logger, int totalFrames, string codec, double elapsed);
 
+    /// <summary>记录视频编码识别结果。</summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="codec">识别出的编码格式</param>
+    [LoggerMessage(Level = LogLevel.Information, Message = "视频编码识别: {Codec}")]
+    public static partial void VideoCodecDetected(ILogger logger, string codec);
+
+    /// <summary>记录视频解码启动信息（格式、分辨率、抽帧间隔）。</summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="codec">编码格式名称</param>
+    /// <param name="width">输出帧宽度</param>
+    /// <param name="height">输出帧高度</param>
+    /// <param name="interval">抽帧间隔（秒）</param>
+    [LoggerMessage(Level = LogLevel.Information, Message = "视频解码启动: 格式={Codec}, 分辨率={Width}x{Height}, 抽帧间隔={Interval:F1}s")]
+    public static partial void VideoDecodeStarted(ILogger logger, string codec, int width, int height, double interval);
+
+    /// <summary>记录 ffmpeg 解码失败（含尾部日志）。</summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="reason">失败原因</param>
+    [LoggerMessage(Level = LogLevel.Error, Message = "ffmpeg 解码失败: {Reason}")]
+    public static partial void VideoDecodeError(ILogger logger, string reason);
+
     /// <summary>记录检测管线异常。</summary>
     /// <param name="logger">日志记录器</param>
     /// <param name="exception">管线异常</param>

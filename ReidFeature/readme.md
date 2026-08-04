@@ -10,10 +10,10 @@
 - **四维特征融合**（换衣鲁棒）：
   | 维度 | 来源 | 默认权重 |
   |---|---|---|
-  | 全身 ReID | FastReID ResNet50-IBN-a（2048-d） | 0.20 |
-  | 头肩 ReID | 同一模型，仅取 bbox 上半 38% 区域 | 0.30 |
-  | 体型标量 | MoveNet Lightning 关键点（头身比 / 肩髋比） | 0.30 |
-  | 步态标量 | ByteTrack 轨迹中心点（步频 / 水平摆幅） | 0.20 |
+  | 全身 ReID | FastReID ResNet50-IBN-a（2048-d） | 0.30 |
+  | 头肩 ReID | 同一模型，仅取 bbox 上半 38% 区域 | 0.40 |
+  | 体型标量 | MoveNet Lightning 关键点（头身比 / 肩髋比） | 0.20 |
+  | 步态标量 | ByteTrack 轨迹中心点（步频 / 水平摆幅） | 0.10 |
 - **质量加权融合**：按 bbox 面积 × 检测置信度选取 Top-K 帧（K ≤ 5）并行特征提取后加权平均
 - **家庭成员 Gallery**：注册 / 删除 / 列出 / JSON 持久化，识别时与 Gallery 成员逐维匹配
 - **Native AOT 发布**：零运行时依赖的独立可执行文件
@@ -128,9 +128,10 @@ dotnet run
 
 ### 检测（Detect）
 
-**`POST /detect/h264stream`** · **`POST /detect/h265stream`**
+**`POST /detect/stream`**
 
 对视频流逐帧执行「检测 → 跟踪 → 融合」，返回每个完成 Track 的四维特征包。
+H264 / H265 裸流均可，编码由服务端自动识别。
 
 Query 参数：
 
@@ -159,10 +160,10 @@ Query 参数：
 
 ### 识别（Recognize）
 
-**`POST /recognize/h264stream/{groupId}`** · **`POST /recognize/h265stream/{groupId}`**
+**`POST /recognize/{groupId}`**
 
 在检测/跟踪/融合之上，将每个 Track 的特征包与 `{groupId}` 下的 Gallery 成员逐维匹配，
-返回**单个最佳匹配**。判定条件：
+返回**单个最佳匹配**。H264 / H265 裸流均可，编码由服务端自动识别。判定条件：
 
 - 最高分 > 0.62（`HitThreshold`）
 - 且与同 Track 次高分差 > 0.08（`MarginThreshold`）
@@ -172,7 +173,7 @@ Query 参数：
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `frameIntervalSeconds` | double | 0.5 | 帧间隔（秒） |
-| `wCloth` / `wHead` / `wBody` / `wGait` | float | 0.20 / 0.30 / 0.30 / 0.20 | 四维权重，可临时调整 |
+| `wCloth` / `wHead` / `wBody` / `wGait` | float | 0.30 / 0.40 / 0.20 / 0.10 | 四维权重，可临时调整 |
 
 响应：`PersonRecognition`（未命中时返回 `name = "stranger"`，`id` 为空串）
 
@@ -193,8 +194,7 @@ Query 参数：
 
 | 方法 | 路径 | 说明 | 响应 |
 |---|---|---|---|
-| POST | `/family/enroll/h264/{groupId}/{memberName}` | 上传视频流注册成员 | `EnrollResult` |
-| POST | `/family/enroll/h265/{groupId}/{memberName}` | 同上（H265） | `EnrollResult` |
+| POST | `/family/enroll/{groupId}/{memberName}` | 上传视频流注册成员（H264/H265 自动识别） | `EnrollResult` |
 | DELETE | `/family/{groupId}/{memberId}` | 删除成员 | `200` / `404` |
 | GET | `/family/{groupId}` | 列出成员摘要 | `MemberInfo[]` |
 
