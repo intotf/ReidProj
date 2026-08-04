@@ -58,6 +58,10 @@ namespace FaceFeature
             app.Map("/", context => context.Response.WriteAsync("HealthCheck"))
                .WithName("HealthCheck");
 
+            app.MapPost("/detect/image", DetectHandler.HandleImageAsync)
+               .WithName("DetectImage")
+               .Accepts<byte[]>("application/octet-stream");
+
             app.MapPost("/detect/stream", DetectHandler.HandleStreamAsync)
                .WithName("DetectStream")
                .Accepts<byte[]>("application/octet-stream");

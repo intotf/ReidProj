@@ -1,6 +1,8 @@
 using FaceFeature.Helpers;
 using FaceFeature.Payloads;
 using FaceFeature.Services;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace FaceFeature.Handlers;
 
@@ -34,5 +36,36 @@ public static class DetectHandler
         }
 
         return new FaceDetection(fused.Bbox, fused.Confidence, fused.Features, fused.Sharpness);
+    }
+
+    /// <summary>
+    /// 处理图像检测请求：上传 JPEG/PNG 等静态图片，解码后检测面积最大的最佳人脸
+    /// </summary>
+    /// <param name="context">HTTP 上下文</param>
+    /// <param name="detectService">检测编排服务</param>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    public static async Task<FaceDetection?> HandleImageAsync(
+        HttpContext context,
+        DetectService detectService,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken = default)
+    {
+        Image<Rgb24> image;
+        try
+        {
+            image = await Image.LoadAsync<Rgb24>(context.Request.Body, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Log.ImageDecodeFailed(logger, ex);
+            cancellationToken.ThrowIfCancellationRequested();
+            return null;
+        }
+
+        using (image)
+        {
+            return detectService.DetectBestFace(image);
+        }
     }
 }
