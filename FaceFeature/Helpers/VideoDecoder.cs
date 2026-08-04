@@ -41,6 +41,7 @@ internal static class VideoDecoder
     /// <summary>
     /// 从视频裸流中流式解码所有帧，逐帧返回 RGB 图像
     /// </summary>
+    /// <remarks>返回的枚举器必须被完整消费或释放，否则池化缓冲与 ffmpeg 进程无法清理。</remarks>
     /// <param name="videoStream">H264 或 H265 裸流数据流</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 5 表示每 5 秒一帧，0.5 表示每 0.5 秒一帧</param>

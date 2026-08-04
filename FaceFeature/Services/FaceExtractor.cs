@@ -74,20 +74,30 @@ public sealed class FaceExtractor : IDisposable
     /// <returns>对齐后的 112×112 人脸与清晰度分数（Aligned 由调用方负责释放）</returns>
     public FaceExtraction AlignAndScore(Image<Rgb24> sourceImage, FaceBox face)
     {
+        Image<Rgb24> aligned;
         if (face.Keypoints is { Length: 5 })
         {
             var sw = Stopwatch.StartNew();
-            var aligned = WarpByLandmarks(sourceImage, face.Keypoints);
+            aligned = WarpByLandmarks(sourceImage, face.Keypoints);
             Log.FaceAligned(_logger, 5, sw.Elapsed.TotalMilliseconds);
+        }
+        else
+        {
+            aligned = AlignFallback(sourceImage, face.Bbox);
+        }
+
+        try
+        {
             float sharpness = EstimateSharpness(aligned);
             Log.FaceSharpness(_logger, sharpness);
             return new FaceExtraction(aligned, sharpness);
         }
-
-        var fallback = AlignFallback(sourceImage, face.Bbox);
-        float fallbackSharpness = EstimateSharpness(fallback);
-        Log.FaceSharpness(_logger, fallbackSharpness);
-        return new FaceExtraction(fallback, fallbackSharpness);
+        catch
+        {
+            // 评分失败时释放对齐图，避免 ImageSharp 原生内存泄漏
+            aligned.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -126,8 +136,8 @@ public sealed class FaceExtractor : IDisposable
 
             // ONNX 推理（自动发现输入/输出名称）
             var inputName = _session.InputMetadata.Keys.First();
-            using var results = _session.Run(
-                [NamedOnnxValue.CreateFromTensor(inputName, inputTensor)]);
+            var input = NamedOnnxValue.CreateFromTensor(inputName, inputTensor);
+            using var results = _session.Run([input]);
 
             // 输出解析 — 512 维特征向量
             var output = (DenseTensor<float>)results[0].AsTensor<float>();

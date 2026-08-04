@@ -42,6 +42,7 @@ public sealed class DetectService
     /// <summary>
     /// 视频逐帧检测流：解码 H264/H265 裸流，逐帧检测并跳过模糊帧
     /// </summary>
+    /// <remarks>返回的枚举器必须被完整消费或释放，否则池化缓冲与 ffmpeg 进程无法清理。</remarks>
     /// <param name="videoStream">H264/H265 裸流数据流</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
     /// <param name="cancellationToken">取消令牌</param>
