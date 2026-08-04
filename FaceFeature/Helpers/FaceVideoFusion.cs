@@ -14,7 +14,7 @@ internal static class FaceVideoFusion
     /// 消费逐帧检测流并产出融合结果；无任何检测帧时返回 null
     /// </summary>
     /// <param name="frames">逐帧检测结果流</param>
-    /// <param name="maxFrames">融合帧数上限（&gt;0）；达到上限时即使未收敛也立即完成</param>
+    /// <param name="maxFrames">融合帧数上限（&gt;0）；达到上限时即使未收敛也立即完成，maxFrames=1 即单帧不融合</param>
     /// <param name="options">融合配置（质量加权、共识门控与收敛早停参数）</param>
     /// <param name="logger">日志记录器（用于离群帧剔除日志）</param>
     /// <param name="cancellationToken">取消令牌</param>
@@ -63,6 +63,13 @@ internal static class FaceVideoFusion
             {
                 FaceDetection detection = enumerator.Current;
 
+                // 融合帧数上限：达到上限立即完成（不受预热/最少帧数限制，maxFrames=1 即单帧不融合）
+                if (acceptedCount >= maxFrames)
+                {
+                    early = true;
+                    break;
+                }
+
                 // 共识门控：预热期无条件接受；之后与当前融合向量余弦低于阈值视为离群帧跳过
                 if (acceptedCount >= warmup && hasFused)
                 {
@@ -100,7 +107,7 @@ internal static class FaceVideoFusion
                             stableRun = cosine >= stabilityCosine ? stableRun + 1 : 0;
                         }
 
-                        if (stableRun >= stableRequired || acceptedCount >= maxFrames)
+                        if (stableRun >= stableRequired)
                         {
                             early = true;
                             break;
