@@ -37,6 +37,33 @@ public sealed class DetectService
         _logger = logger;
     }
 
+
+
+    /// <summary>
+    /// 视频逐帧检测流：解码 H264/H265 裸流，逐帧检测并跳过模糊帧
+    /// </summary>
+    /// <param name="videoStream">H264/H265 裸流数据流</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    public async IAsyncEnumerable<FaceDetection> DetectFramesAsync(
+        Stream videoStream,
+        double frameIntervalSeconds,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await foreach (var image in VideoDecoder.DecodeFramesAsync(
+            videoStream, _logger, frameIntervalSeconds, cancellationToken))
+        {
+            using (image)
+            {
+                var detection = DetectBestFace(image, skipBlurry: true);
+                if (detection is not null)
+                {
+                    yield return detection;
+                }
+            }
+        }
+    }
+
     /// <summary>
     /// 对输入图像检测面积最大的最佳人脸（性能优先——避免全量特征提取）
     /// </summary>
@@ -73,30 +100,5 @@ public sealed class DetectService
             Confidence: best.Confidence,
             Features: features,
             Sharpness: extraction.Sharpness);
-    }
-
-    /// <summary>
-    /// 视频逐帧检测流：解码 H264/H265 裸流，逐帧检测并跳过模糊帧
-    /// </summary>
-    /// <param name="videoStream">H264/H265 裸流数据流</param>
-    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    internal async IAsyncEnumerable<FaceDetection> DetectFramesAsync(
-        Stream videoStream,
-        double frameIntervalSeconds,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        await foreach (var image in VideoDecoder.DecodeFramesAsync(
-            videoStream, _logger, frameIntervalSeconds, cancellationToken))
-        {
-            using (image)
-            {
-                var detection = DetectBestFace(image, skipBlurry: true);
-                if (detection is not null)
-                {
-                    yield return detection;
-                }
-            }
-        }
     }
 }
