@@ -40,7 +40,8 @@ public sealed class DetectService
 
 
     /// <summary>
-    /// 视频逐帧检测流：解码 H264/H265 裸流，逐帧检测并跳过模糊帧
+    /// 视频逐帧检测流：解码 H264/H265 裸流，逐帧检测并跳过模糊帧；
+    /// 本帧未检测到人脸时，下一帧直接跳过检测（节省推理开销）
     /// </summary>
     /// <remarks>返回的枚举器必须被完整消费或释放，否则池化缓冲与 ffmpeg 进程无法清理。</remarks>
     /// <param name="videoStream">H264/H265 裸流数据流</param>
@@ -51,15 +52,28 @@ public sealed class DetectService
         double frameIntervalSeconds,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        bool skipNext = false;
         await foreach (var image in VideoDecoder.DecodeFramesAsync(
             videoStream, _logger, frameIntervalSeconds, cancellationToken))
         {
             using (image)
             {
+                // 上一帧无人脸时，本帧跳过检测，仅消费解码帧以保持 ffmpeg 管道流通
+                if (skipNext)
+                {
+                    skipNext = false;
+                    continue;
+                }
+
                 var detection = DetectBestFace(image, skipBlurry: true);
                 if (detection is not null)
                 {
                     yield return detection;
+                }
+                else
+                {
+                    // 本帧无人脸（或模糊被跳过）→ 下一帧跳过检测
+                    skipNext = true;
                 }
             }
         }
