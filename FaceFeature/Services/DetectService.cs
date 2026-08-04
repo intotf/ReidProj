@@ -15,7 +15,7 @@ public sealed class DetectService
 {
     private readonly FaceDetector _faceDetector;
     private readonly FaceExtractor _faceExtractor;
-    private readonly FaceQualityOptions _qualityOptions;
+    private readonly FaceFeatureOptions _options;
     private readonly ILogger<DetectService> _logger;
 
     /// <summary>
@@ -23,17 +23,17 @@ public sealed class DetectService
     /// </summary>
     /// <param name="faceDetector">人脸检测器</param>
     /// <param name="faceExtractor">人脸特征提取器</param>
-    /// <param name="qualityOptions">清晰度筛选配置</param>
+    /// <param name="options">人脸流水线配置（清晰度筛选等）</param>
     /// <param name="logger">日志记录器</param>
     public DetectService(
         FaceDetector faceDetector,
         FaceExtractor faceExtractor,
-        IOptions<FaceQualityOptions> qualityOptions,
+        IOptions<FaceFeatureOptions> options,
         ILogger<DetectService> logger)
     {
         _faceDetector = faceDetector;
         _faceExtractor = faceExtractor;
-        _qualityOptions = qualityOptions.Value;
+        _options = options.Value;
         _logger = logger;
     }
 
@@ -81,9 +81,9 @@ public sealed class DetectService
 
         using var extraction = _faceExtractor.AlignAndScore(image, best);
 
-        if (skipBlurry && _qualityOptions.Enabled && extraction.Sharpness < _qualityOptions.SharpnessThreshold)
+        if (skipBlurry && _options.FaceQuality.Enabled && extraction.Sharpness < _options.FaceQuality.SharpnessThreshold)
         {
-            Log.FaceSkippedBlurry(_logger, extraction.Sharpness, _qualityOptions.SharpnessThreshold);
+            Log.FaceSkippedBlurry(_logger, extraction.Sharpness, _options.FaceQuality.SharpnessThreshold);
             return null;
         }
 

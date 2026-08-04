@@ -7,7 +7,7 @@
 - 🔍 **人脸检测**：SCRFD-10g（`det_10g.onnx`），640×640 letterbox 推理，固定模型布局（3 层 FPN、5 关键点），NMS 去重
 - 🎯 **五点对齐**：利用 SCRFD 关键点做 InsightFace 标准相似变换对齐到 112×112，替代简单裁剪缩放，显著提升同人相似度
 - 🔆 **清晰帧筛选**：对齐后人脸 Laplacian 方差作为清晰度分数，低于阈值的模糊帧直接跳过
-- 🧬 **视频多帧融合**：增量累加整段流的特征（`float[]`），融合向量连续收敛或达到帧数上限时**提前完成**，无需等整段视频结束
+- 🧬 **视频多帧融合**：按 `confidence × sharpness` **质量加权**增量累加整段流的特征（`float[]`），**共识门控**剔除离群帧，融合向量连续收敛或达到帧数上限时**提前完成**，无需等整段视频结束
 - 🏷️ **人脸管理**：注册 / 查询 / 删除 REST API，特征与元数据持久化为 JSON 索引（`index.json`），重启免重新提取
 - ⚡ **性能优化**：`ArrayPool` 大缓冲复用、`TensorPrimitives` SIMD 向量化、ONNX 会话独立线程配置、AOT 发布、源生成 JSON 序列化
 - 🔌 **线格式**：内部统一 `float[]` 特征，仅在 HTTP / JSON 边界经自定义 Converter 以 base64 编解码
@@ -45,7 +45,7 @@ FaceFeature/
 ├── Payloads/                     # 数据模型（API 线格式使用 public，其余 internal）
 ├── Helpers/                      # 静态工具
 │   ├── VideoDecoder.cs           # ffmpeg pipe 流式解码
-│   ├── FaceVideoFusion.cs        # 视频多帧融合（收敛提前完成）
+│   ├── FaceVideoFusion.cs        # 视频多帧融合（质量加权 + 共识门控 + 收敛提前完成）
 │   └── Log.cs                    # 结构化日志
 ├── models/                       # ONNX 模型（见“模型准备”）
 ├── tools/                        # ffmpeg / ffmpeg.exe
@@ -214,9 +214,12 @@ curl -X DELETE http://localhost:9000/faces/group1/{faceId}
 
 ### 视频多帧融合（FaceVideoFusion）
 
-- 逐帧增量累加特征（`TensorPrimitives.Add`），均值 + L2 归一化
-- 累计 ≥3 帧后，相邻融合向量余弦连续 2 次 ≥ 0.99（或达到 `fusionFrames` 上限）即判定收敛，**提前完成**并停止读取剩余流
+- 逐帧按质量加权累加特征（权重 = `confidence × sharpness`，`TensorPrimitives` 向量化），加权均值 + L2 归一化
+- **共识门控**：预热帧（默认 3 帧）后，新帧与当前融合向量的余弦低于 `ConsensusGate`（默认 0.85）视为离群帧，不参与融合（剔除错检 / 遮挡 / 混入的其他人脸）
+- **收敛早停**：参与融合帧数达到 `MinFrames`（默认 6，按门铃 5~7 秒短视频标定）后，相邻融合向量余弦连续 `StableRequired`（默认 2）次 ≥ `StabilityCosine`（默认 0.99），或达到 `fusionFrames` 上限时判定收敛，**提前完成**并停止读取剩余流
 - 一个视频输入只产出一个融合结果
+
+> 调参提示：门铃摄像头通常只抓取 5~7 秒短视频，按默认 0.5s 抽帧仅 10~14 帧，`MinFrames` 过高（如 15）会导致早停永远不触发、整段全量处理；实测 `MinFrames=6` + `StableRequired=2` 在短视频上既能触发收敛又能保留质量。小脸（人脸宽高 <80px）的特征向量不可靠，检测层会按 `MinFaceSize`（默认 80）直接丢弃
 
 ### 特征比对
 
@@ -243,8 +246,15 @@ curl -X DELETE http://localhost:9000/faces/group1/{faceId}
 | `Kestrel.Endpoints.Http.Url` | `http://*:9000` | 监听地址 |
 | `Onnx.Face.IntraOpNumThreads` | `1` | 检测会话线程数（门禁场景实测建议 2~4，约 2.6 倍提速） |
 | `Onnx.FaceRec.IntraOpNumThreads` | `0` | 特征提取会话线程数（0 = 全部核心） |
-| `FaceQuality.Enabled` | `true` | 是否启用清晰帧筛选 |
-| `FaceQuality.SharpnessThreshold` | `10` | 清晰度阈值（Laplacian 方差，按摄像头画质标定） |
+| `FaceFeature.MinFaceSize` | `80` | 人脸最小尺寸（像素），低于该值的检测框丢弃（小脸特征不可靠） |
+| `FaceFeature.FaceRecognitionModelName` | `glintr100.onnx` | 人脸特征模型文件名（models 目录下） |
+| `FaceFeature.FaceQuality.Enabled` | `true` | 是否启用清晰帧筛选 |
+| `FaceFeature.FaceQuality.SharpnessThreshold` | `10` | 清晰度阈值（Laplacian 方差，按摄像头画质标定） |
+| `FaceFeature.Fusion.MinFrames` | `6` | 融合至少积累的帧数（按 5~7 秒门铃短视频标定） |
+| `FaceFeature.Fusion.StabilityCosine` | `0.99` | 相邻融合向量余弦达到该值视为一次“稳定” |
+| `FaceFeature.Fusion.StableRequired` | `2` | 连续稳定次数达到该值提前完成融合 |
+| `FaceFeature.Fusion.ConsensusGate` | `0.85` | 共识门控余弦阈值（低于该值的新帧视为离群帧剔除） |
+| `FaceFeature.Fusion.ConsensusWarmup` | `3` | 共识门控预热帧数（前 N 帧无条件参与融合） |
 | 请求体上限 | 20 MB | `Program.cs` Kestrel 限制 |
 
 ONNX 会话级选项（`OnnxSessionOptions`）可独立配置两个模型的 `IntraOpNumThreads`、`InterOpNumThreads`、`ExecutionMode`、`GraphOptimizationLevel`。
