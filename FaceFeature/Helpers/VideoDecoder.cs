@@ -15,7 +15,7 @@ namespace FaceFeature.Helpers;
 /// 输出 rawvideo(RGB24)（无封装头，RGB 字节序与 ImageSharp Rgb24 一致）；
 /// 默认启用硬件解码（-hwaccel auto，无可用硬件时自动回退软解）。
 /// </summary>
-internal static class VideoDecoder
+internal static partial class VideoDecoder
 {
     /// <summary>视频编码格式（内部使用，由 NAL 头嗅探判定）</summary>
     private enum VideoCodec
@@ -31,9 +31,8 @@ internal static class VideoDecoder
     private static readonly TimeSpan ResolutionTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>解析 ffmpeg 输出流分辨率，例如：Video: rawvideo (RGB[24] / 0x18424752), rgb24, 1920x1080, ...</summary>
-    private static readonly Regex OutputResolutionRegex = new(
-        @"Video:\s+rawvideo.*?(\d{2,5})x(\d{2,5})",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"Video:\s+rawvideo.*?(\d{2,5})x(\d{2,5})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex OutputResolutionRegex();
 
     /// <summary>嗅探结果：识别出的编码（无法识别时为 null）与已读出的字节数</summary>
     private readonly record struct SniffResult(VideoCodec? Codec, int Length);
@@ -100,12 +99,15 @@ internal static class VideoDecoder
     }
 
     /// <summary>返回 ffmpeg -f 参数所需的格式名称（小写）</summary>
-    private static string ToFfmpegFormat(VideoCodec codec) => codec switch
+    private static string ToFfmpegFormat(VideoCodec codec)
     {
-        VideoCodec.H264 => "h264",
-        VideoCodec.H265 => "hevc",
-        _ => throw new ArgumentOutOfRangeException(nameof(codec))
-    };
+        return codec switch
+        {
+            VideoCodec.H264 => "h264",
+            VideoCodec.H265 => "hevc",
+            _ => throw new ArgumentOutOfRangeException(nameof(codec)),
+        };
+    }
 
     // ──── 编码嗅探 ──────────────────────────────────────────────
 
@@ -391,7 +393,7 @@ internal static class VideoDecoder
 
                 if (!resolution.Task.IsCompleted)
                 {
-                    var match = OutputResolutionRegex.Match(line);
+                    var match = OutputResolutionRegex().Match(line);
                     if (match.Success)
                     {
                         resolution.TrySetResult((

@@ -14,11 +14,14 @@ public sealed class OnnxSessionOptions
     /// <summary>人脸特征模型文件名（models 目录下），默认 glintr100.onnx（ArcFace R100），可切换 w600k_r50.onnx 等</summary>
     public string FaceRecognitionModelName { get; set; } = "glintr100.onnx";
 
-    private static Microsoft.ML.OnnxRuntime.SessionOptions Default() => new()
+    private static Microsoft.ML.OnnxRuntime.SessionOptions Default()
     {
-        IntraOpNumThreads = 1,
-        InterOpNumThreads = 1,
-        ExecutionMode = Microsoft.ML.OnnxRuntime.ExecutionMode.ORT_SEQUENTIAL,
-        GraphOptimizationLevel = Microsoft.ML.OnnxRuntime.GraphOptimizationLevel.ORT_ENABLE_ALL,
-    };
+        return new Microsoft.ML.OnnxRuntime.SessionOptions
+        {
+            IntraOpNumThreads = 1,
+            InterOpNumThreads = 1,
+            ExecutionMode = Microsoft.ML.OnnxRuntime.ExecutionMode.ORT_SEQUENTIAL,
+            GraphOptimizationLevel = Microsoft.ML.OnnxRuntime.GraphOptimizationLevel.ORT_ENABLE_ALL,
+        };
+    }
 }

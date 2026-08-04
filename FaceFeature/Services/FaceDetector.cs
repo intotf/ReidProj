@@ -157,7 +157,10 @@ public sealed class FaceDetector : IDisposable
     /// <summary>
     /// 释放 ONNX Runtime 推理会话
     /// </summary>
-    public void Dispose() => _session?.Dispose();
+    public void Dispose()
+    {
+        _session?.Dispose();
+    }
 
     /// <summary>
     /// 单趟完成 letterbox 缩放 + 归一化：双线性采样源图并直接写入 SCRFD 的 CHW 张量，

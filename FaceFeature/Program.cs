@@ -11,6 +11,7 @@ namespace FaceFeature
         /// <summary>
         /// 应用程序入口 — 构建服务、注册中间件、启动 Kestrel 主机
         /// </summary>
+        /// <param name="args">命令行参数</param>
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateSlimBuilder(args);
@@ -55,7 +56,10 @@ namespace FaceFeature
             // ── 路由端点 ──────────────────────────────────
             app.MapOpenApi();
 
-            app.Map("/", context => context.Response.WriteAsync("HealthCheck"))
+            app.Map("/", context =>
+            {
+                return context.Response.WriteAsync("HealthCheck");
+            })
                .WithName("HealthCheck");
 
             app.MapPost("/detect/image", DetectHandler.HandleImageAsync)

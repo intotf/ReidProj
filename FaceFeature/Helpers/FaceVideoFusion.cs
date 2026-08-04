@@ -126,5 +126,7 @@ internal static class FaceVideoFusion
 
     /// <summary>两个 L2 归一化特征的余弦相似度（等价点积）</summary>
     private static float Cosine(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
-        => TensorPrimitives.Dot(a, b);
+    {
+        return TensorPrimitives.Dot(a, b);
+    }
 }

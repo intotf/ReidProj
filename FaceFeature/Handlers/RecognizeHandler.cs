@@ -68,7 +68,7 @@ namespace FaceFeature.Handlers
         }
 
         private static FaceRecognition? MatchPerson(
-            FacePerson[] persons,
+            ReadOnlySpan<FacePerson> persons,
             ReadOnlySpan<float> features,
             float similarityThreshold)
         {

@@ -9,7 +9,14 @@ namespace FaceFeature.Payloads;
 public sealed record FaceRegistrationResult(bool Success, FaceInfo? Face, string? Error)
 {
     /// <summary>创建注册成功结果</summary>
-    public static FaceRegistrationResult Ok(FaceInfo face) => new(true, face, null);
+    public static FaceRegistrationResult Ok(FaceInfo face)
+    {
+        return new FaceRegistrationResult(true, face, null);
+    }
+
     /// <summary>创建注册失败结果</summary>
-    public static FaceRegistrationResult Failed(string error) => new(false, null, error);
+    public static FaceRegistrationResult Failed(string error)
+    {
+        return new FaceRegistrationResult(false, null, error);
+    }
 }

@@ -11,5 +11,8 @@ namespace FaceFeature.Payloads;
 public sealed record FaceExtraction(Image<Rgb24> Aligned, float Sharpness) : IDisposable
 {
     /// <summary>释放对齐人脸图</summary>
-    public void Dispose() => Aligned.Dispose();
+    public void Dispose()
+    {
+        Aligned.Dispose();
+    }
 }

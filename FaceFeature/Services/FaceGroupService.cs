@@ -42,6 +42,9 @@ public sealed class FaceGroupService
     /// <summary>
     /// 获取指定分组下全部人脸（含特征向量），用于 1:N 比对
     /// </summary>
+    /// <param name="groupId">分组 ID</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>分组下全部人物信息（含特征向量），分组不存在或为空时返回空数组</returns>
     public Task<FacePerson[]> GetPersonsAsync(string groupId, CancellationToken cancellationToken)
     {
         lock (_lock)
@@ -59,6 +62,9 @@ public sealed class FaceGroupService
     /// <summary>
     /// 列出指定分组下所有人脸（不含特征向量）
     /// </summary>
+    /// <param name="groupId">分组 ID</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>分组下所有人脸信息（不含特征向量），分组不存在时返回空数组</returns>
     public Task<FaceInfo[]> ListAsync(string groupId, CancellationToken cancellationToken)
     {
         lock (_lock)
@@ -75,6 +81,11 @@ public sealed class FaceGroupService
     /// <summary>
     /// 查询单张已注册人脸
     /// </summary>
+    /// <param name="groupId">分组 ID</param>
+    /// <param name="faceId">人脸 ID</param>
+    /// <param name="includeFeatures">是否包含特征向量</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>人脸信息，不存在时返回 null</returns>
     public Task<FaceInfo?> GetAsync(string groupId, string faceId, bool includeFeatures, CancellationToken cancellationToken)
     {
         lock (_lock)
@@ -223,6 +234,10 @@ public sealed class FaceGroupService
     /// <summary>
     /// 删除指定人脸：更新特征索引并删除磁盘图片（空目录一并清理）
     /// </summary>
+    /// <param name="groupId">分组 ID</param>
+    /// <param name="faceId">人脸 ID</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>是否删除成功</returns>
     public Task<bool> DeleteAsync(string groupId, string faceId, CancellationToken cancellationToken)
     {
         groupId = ValidateSegment(groupId, nameof(groupId));
@@ -406,24 +421,29 @@ public sealed class FaceGroupService
         public required string ImagePath { get; init; }
         public required DateTime RegisteredAt { get; init; }
 
-        public FaceInfo ToInfo(bool includeFeatures) =>
-            new(Id, GroupId, Name, Confidence, Sharpness, Bbox, RegisteredAt,
-                includeFeatures ? Features : null);
-
-        public PersistedFace ToStored() => new()
+        public FaceInfo ToInfo(bool includeFeatures)
         {
-            Id = Id,
-            GroupId = GroupId,
-            Name = Name,
-            Confidence = Confidence,
-            Sharpness = Sharpness,
-            BboxX = Bbox.X,
-            BboxY = Bbox.Y,
-            BboxWidth = Bbox.Width,
-            BboxHeight = Bbox.Height,
-            RegisteredAt = RegisteredAt,
-            FaceFeatures = Features,
-            ImageFile = $"{ImagesDirName}/{Path.GetFileName(ImagePath)}",
-        };
+            return new FaceInfo(Id, GroupId, Name, Confidence, Sharpness, Bbox, RegisteredAt,
+                includeFeatures ? Features : null);
+        }
+
+        public PersistedFace ToStored()
+        {
+            return new PersistedFace
+            {
+                Id = Id,
+                GroupId = GroupId,
+                Name = Name,
+                Confidence = Confidence,
+                Sharpness = Sharpness,
+                BboxX = Bbox.X,
+                BboxY = Bbox.Y,
+                BboxWidth = Bbox.Width,
+                BboxHeight = Bbox.Height,
+                RegisteredAt = RegisteredAt,
+                FaceFeatures = Features,
+                ImageFile = $"{ImagesDirName}/{Path.GetFileName(ImagePath)}",
+            };
+        }
     }
 }

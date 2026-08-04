@@ -154,7 +154,7 @@ public sealed class FaceExtractor : IDisposable
     /// <summary>
     /// 五点相似变换仿射到 112×112（逆映射双线性采样，越界填黑）
     /// </summary>
-    private static Image<Rgb24> WarpByLandmarks(Image<Rgb24> source, PointF[] landmarks)
+    private static Image<Rgb24> WarpByLandmarks(Image<Rgb24> source, ReadOnlySpan<PointF> landmarks)
     {
         var forward = EstimateSimilarityTransform(landmarks, ArcFaceTemplate);
         Matrix3x2.Invert(forward, out var inverse);
@@ -459,5 +459,8 @@ public sealed class FaceExtractor : IDisposable
     /// <summary>
     /// 释放 ONNX Runtime 推理会话
     /// </summary>
-    public void Dispose() => _session?.Dispose();
+    public void Dispose()
+    {
+        _session?.Dispose();
+    }
 }

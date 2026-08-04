@@ -19,10 +19,10 @@ namespace FaceFeature.Payloads
         /// <summary>
         /// 人脸分组中的人物信息
         /// </summary>
-        /// <param name="id"></param>
-        /// <param name="groupId"></param>
-        /// <param name="name"></param>
-        /// <param name="faceFeatures"></param>
+        /// <param name="id">人物 ID</param>
+        /// <param name="groupId">所在分组 ID</param>
+        /// <param name="name">人物名称</param>
+        /// <param name="faceFeatures">人脸特征向量（ArcFace 512-dim float[]）</param>
         public FacePerson(string id, string groupId, string name, float[] faceFeatures)
         {
             Id = id;
