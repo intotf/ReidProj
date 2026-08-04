@@ -1,4 +1,5 @@
 using FaceFeature.Payloads;
+using System.Buffers;
 using System.Numerics.Tensors;
 
 namespace FaceFeature.Helpers;
@@ -29,49 +30,69 @@ internal static class FaceVideoFusion
         int maxFrames,
         CancellationToken cancellationToken)
     {
-        float[]? accumulator = null;
-        float[]? previousFused = null;
-        int stableRun = 0;
-        int count = 0;
-        FaceDetection? representative = null;
-        float[]? resultFeatures = null;
-        bool early = false;
-
-        await foreach (var detection in frames.WithCancellation(cancellationToken))
-        {
-            accumulator ??= new float[detection.Features.Length];
-            Accumulate(accumulator, detection.Features);
-            count++;
-
-            if (representative is null || detection.Confidence > representative.Confidence)
-            {
-                representative = detection;
-            }
-
-            if (count >= MinFrames)
-            {
-                var fused = Normalize(accumulator);
-                if (previousFused is not null)
-                {
-                    float cosine = Cosine(previousFused, fused);
-                    stableRun = cosine >= StabilityCosine ? stableRun + 1 : 0;
-                    if (stableRun >= StableRequired || count >= maxFrames)
-                    {
-                        resultFeatures = fused;
-                        early = true;
-                        break;
-                    }
-                }
-                previousFused = fused;
-            }
-        }
-
-        if (count == 0 || representative is null)
+        await using var enumerator = frames.WithCancellation(cancellationToken).GetAsyncEnumerator();
+        if (!await enumerator.MoveNextAsync())
         {
             return null;
         }
 
-        resultFeatures ??= Normalize(accumulator!);
+        // 以第一帧确定特征维度，初始化累加器与两块轮换缓冲区
+        FaceDetection representative = enumerator.Current;
+        int length = representative.Features.Length;
+        var accumulator = new float[length];
+        var bufferA = ArrayPool<float>.Shared.Rent(length);
+        var bufferB = ArrayPool<float>.Shared.Rent(length);
+        float[] previousFused = bufferB; // 占位，hasPrevious 为 false 时不会读取
+        int stableRun = 0;
+        int count = 1;
+        bool early = false;
+        bool hasPrevious = false;
+        bool writeToB = false;
+
+        Accumulate(accumulator, representative.Features);
+
+        try
+        {
+            while (await enumerator.MoveNextAsync())
+            {
+                FaceDetection detection = enumerator.Current;
+                Accumulate(accumulator, detection.Features);
+                count++;
+
+                if (detection.Confidence > representative.Confidence)
+                {
+                    representative = detection;
+                }
+
+                if (count >= MinFrames)
+                {
+                    float[] fused = writeToB ? bufferB : bufferA;
+                    Normalize(accumulator, fused.AsSpan(0, length));
+                    if (hasPrevious)
+                    {
+                        float cosine = Cosine(previousFused.AsSpan(0, length), fused.AsSpan(0, length));
+                        stableRun = cosine >= StabilityCosine ? stableRun + 1 : 0;
+                        if (stableRun >= StableRequired || count >= maxFrames)
+                        {
+                            early = true;
+                            break;
+                        }
+                    }
+                    previousFused = fused;
+                    hasPrevious = true;
+                    writeToB = !writeToB;
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(bufferA);
+            ArrayPool<float>.Shared.Return(bufferB);
+        }
+
+        // 结果数组需随 FusedFaceResult 存活，不能直接使用池缓冲区
+        var resultFeatures = new float[length];
+        Normalize(accumulator, resultFeatures);
 
         return new FusedFaceResult(
             resultFeatures,
@@ -88,19 +109,19 @@ internal static class FaceVideoFusion
         TensorPrimitives.Add(accumulator, features, accumulator);
     }
 
-    /// <summary>均值 + L2 归一化得到融合特征（均值方向与累加和一致，无需除以帧数）</summary>
-    private static float[] Normalize(ReadOnlySpan<float> accumulator)
+    /// <summary>
+    /// 均值 + L2 归一化得到融合特征（均值方向与累加和一致，无需除以帧数）；
+    /// 结果写入调用方提供的缓冲区，不分配数组。
+    /// </summary>
+    private static void Normalize(ReadOnlySpan<float> accumulator, Span<float> destination)
     {
-        var acc = new float[accumulator.Length];
-        accumulator.CopyTo(acc);
+        accumulator.CopyTo(destination);
 
-        float norm = TensorPrimitives.Norm<float>(acc);
+        float norm = TensorPrimitives.Norm<float>(destination);
         if (norm > 0)
         {
-            TensorPrimitives.Divide(acc, norm, acc);
+            TensorPrimitives.Divide(destination, norm, destination);
         }
-
-        return acc;
     }
 
     /// <summary>两个 L2 归一化特征的余弦相似度（等价点积）</summary>

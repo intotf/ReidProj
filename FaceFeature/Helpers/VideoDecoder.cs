@@ -35,8 +35,8 @@ internal static class VideoDecoder
         @"Video:\s+rawvideo.*?(\d{2,5})x(\d{2,5})",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    /// <summary>嗅探结果：识别出的编码（无法识别时为 null）与已读出的前缀字节</summary>
-    private readonly record struct SniffResult(VideoCodec? Codec, byte[] Prefix);
+    /// <summary>嗅探结果：识别出的编码（无法识别时为 null）与已读出的字节数</summary>
+    private readonly record struct SniffResult(VideoCodec? Codec, int Length);
 
     /// <summary>
     /// 从视频裸流中流式解码所有帧，逐帧返回 RGB 图像
@@ -52,38 +52,50 @@ internal static class VideoDecoder
         double frameIntervalSeconds,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        // 1. 嗅探编码：读取流前缀并判定 H264 / H265
-        var sniff = await SniffCodecAsync(videoStream, cancellationToken);
-        if (sniff.Prefix.Length == 0)
+        byte[] sniffBuffer = ArrayPool<byte>.Shared.Rent(SniffBufferSize);
+        try
         {
-            Log.VideoDecodeFailed(logger, new InvalidDataException("视频流为空"));
-            yield break;
+            // 1. 嗅探编码：读取流前缀并判定 H264 / H265
+            var sniff = await SniffCodecAsync(videoStream, sniffBuffer, cancellationToken);
+            if (sniff.Length == 0)
+            {
+                Log.VideoDecodeFailed(logger, new InvalidDataException("视频流为空"));
+                yield break;
+            }
+            if (sniff.Codec is not { } codec)
+            {
+                throw new InvalidDataException("无法从裸流识别视频编码，仅支持 H264/H265（Annex B）裸流");
+            }
+
+            string format = ToFfmpegFormat(codec);
+            Log.VideoCodecDetected(logger, format);
+
+            // 2. 启动 ffmpeg 解码会话（进程、输入写入、stderr 排空与分辨率解析）
+            var sw = Stopwatch.StartNew();
+            await using var session = new FfmpegSession(codec, frameIntervalSeconds, cancellationToken);
+            var (width, height) = await session.OpenAsync(
+                videoStream,
+                sniffBuffer.AsMemory(0, sniff.Length),
+                logger);
+            Log.VideoDecodeStarted(logger, format, width, height, frameIntervalSeconds);
+
+            // 3. 逐帧消费输出；融合提前结束时，await using 会异步终止进程并清理资源
+            int frameCount = 0;
+            await foreach (var image in session.ReadFramesAsync(width, height, cancellationToken))
+            {
+                frameCount++;
+                Log.VideoDecodeCompleted(logger, format, frameCount, sw.Elapsed.TotalMilliseconds);
+                yield return image;
+            }
+
+            sw.Stop();
+            Log.VideoDecodeAllCompleted(logger, frameCount, format, sw.Elapsed.TotalMilliseconds);
         }
-        if (sniff.Codec is not { } codec)
+        finally
         {
-            throw new InvalidDataException("无法从裸流识别视频编码，仅支持 H264/H265（Annex B）裸流");
+            // 等 ffmpeg 会话销毁（含前缀写入完成）后再归还嗅探缓冲区
+            ArrayPool<byte>.Shared.Return(sniffBuffer);
         }
-
-        string format = ToFfmpegFormat(codec);
-        Log.VideoCodecDetected(logger, format);
-
-        // 2. 启动 ffmpeg 解码会话（进程、输入写入、stderr 排空与分辨率解析）
-        var sw = Stopwatch.StartNew();
-        await using var session = new FfmpegSession(codec, frameIntervalSeconds, cancellationToken);
-        var (width, height) = await session.OpenAsync(videoStream, sniff.Prefix, logger);
-        Log.VideoDecodeStarted(logger, format, width, height, frameIntervalSeconds);
-
-        // 3. 逐帧消费输出；融合提前结束时，await using 会异步终止进程并清理资源
-        int frameCount = 0;
-        await foreach (var image in session.ReadFramesAsync(width, height, cancellationToken))
-        {
-            frameCount++;
-            Log.VideoDecodeCompleted(logger, format, frameCount, sw.Elapsed.TotalMilliseconds);
-            yield return image;
-        }
-
-        sw.Stop();
-        Log.VideoDecodeAllCompleted(logger, frameCount, format, sw.Elapsed.TotalMilliseconds);
     }
 
     /// <summary>返回 ffmpeg -f 参数所需的格式名称（小写）</summary>
@@ -97,38 +109,30 @@ internal static class VideoDecoder
     // ──── 编码嗅探 ──────────────────────────────────────────────
 
     /// <summary>
-    /// 读取裸流前若干字节并判定 H264 / H265
+    /// 读取裸流前若干字节并判定 H264 / H265；缓冲区由调用方通过
+    /// <see cref="ArrayPool{T}"/> 租用并负责归还，本方法不复制数据。
     /// </summary>
-    private static async Task<SniffResult> SniffCodecAsync(Stream videoStream, CancellationToken cancellationToken)
+    private static async Task<SniffResult> SniffCodecAsync(
+        Stream videoStream,
+        byte[] buffer,
+        CancellationToken cancellationToken)
     {
-        byte[] rented = ArrayPool<byte>.Shared.Rent(SniffBufferSize);
-        try
+        int total = 0;
+        while (total < SniffBufferSize)
         {
-            int total = 0;
-            while (total < SniffBufferSize)
+            int read = await videoStream.ReadAsync(
+                buffer.AsMemory(total, SniffBufferSize - total),
+                cancellationToken);
+            if (read == 0)
             {
-                int read = await videoStream.ReadAsync(
-                    rented.AsMemory(total, SniffBufferSize - total),
-                    cancellationToken);
-                if (read == 0)
-                {
-                    break;
-                }
-                total += read;
+                break;
             }
-
-            if (total == 0)
-            {
-                return new SniffResult(null, Array.Empty<byte>());
-            }
-
-            var prefix = rented.AsSpan(0, total).ToArray();
-            return new SniffResult(DetectCodec(prefix), prefix);
+            total += read;
         }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(rented);
-        }
+
+        return total == 0
+            ? new SniffResult(null, 0)
+            : new SniffResult(DetectCodec(buffer.AsSpan(0, total)), total);
     }
 
     /// <summary>
@@ -209,7 +213,7 @@ internal static class VideoDecoder
         /// <param name="prefix">嗅探阶段已读出的前缀字节</param>
         /// <param name="logger">日志记录器</param>
         /// <returns>输出帧的分辨率</returns>
-        public async Task<(int Width, int Height)> OpenAsync(Stream input, byte[] prefix, ILogger logger)
+        public async Task<(int Width, int Height)> OpenAsync(Stream input, ReadOnlyMemory<byte> prefix, ILogger logger)
         {
             var resolutionTcs = new TaskCompletionSource<(int Width, int Height)>(TaskCreationOptions.RunContinuationsAsynchronously);
             _stderrTask = DrainStderrAsync(_process.StandardError, resolutionTcs, logger, _writeCts.Token);
@@ -328,13 +332,13 @@ internal static class VideoDecoder
     /// <summary>将嗅探前缀 + 剩余视频流写入 ffmpeg stdin 并关闭</summary>
     private static async Task WriteInputAsync(
         Stream videoStream,
-        byte[] prefix,
+        ReadOnlyMemory<byte> prefix,
         StreamWriter stdInput,
         CancellationToken cancellationToken)
     {
         try
         {
-            if (prefix.Length > 0)
+            if (!prefix.IsEmpty)
             {
                 await stdInput.BaseStream.WriteAsync(prefix, cancellationToken);
             }
