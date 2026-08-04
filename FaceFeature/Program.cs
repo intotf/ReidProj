@@ -11,6 +11,7 @@ namespace FaceFeature
         /// <summary>
         /// 应用程序入口 — 构建服务、注册中间件、启动 Kestrel 主机
         /// </summary>
+        /// <param name="args">命令行参数</param>
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateSlimBuilder(args);
@@ -18,6 +19,10 @@ namespace FaceFeature
             // ── ONNX Runtime 配置 ─────────────────────────
             builder.Services.Configure<OnnxSessionOptions>(
                 builder.Configuration.GetSection("Onnx"));
+
+            // ── 清晰度筛选配置 ────────────────────────────
+            builder.Services.Configure<FaceFeatureOptions>(
+                builder.Configuration.GetSection("FaceFeature"));
 
             // ── JSON 序列化 ──────────────────────────────
             builder.Services.ConfigureHttpJsonOptions(options =>
@@ -35,7 +40,7 @@ namespace FaceFeature
             builder.Services.AddSingleton<FaceDetector>();
             builder.Services.AddSingleton<FaceExtractor>();
             builder.Services.AddSingleton<DetectService>();
-            builder.Services.AddSingleton<IFaceGroupProvider, MockFaceGroupProvider>();
+            builder.Services.AddSingleton<FaceGroupService>();
 
             builder.Services.AddHttpClient();
 
@@ -51,38 +56,37 @@ namespace FaceFeature
             // ── 路由端点 ──────────────────────────────────
             app.MapOpenApi();
 
-            app.Map("/", context => context.Response.WriteAsync("HealthCheck"))
+            app.Map("/", context =>
+            {
+                return context.Response.WriteAsync("HealthCheck");
+            })
                .WithName("HealthCheck");
 
             app.MapPost("/detect/image", DetectHandler.HandleImageAsync)
                .WithName("DetectImage")
                .Accepts<byte[]>("application/octet-stream");
 
-            app.MapPost("/detect/imageurl", DetectHandler.HandleImageUrlAsync)
-               .WithName("DetectImageUrl");
-
-            app.MapPost("/detect/h264stream", DetectHandler.HandleH264StreamAsync)
-               .WithName("DetectH264Stream")
+            app.MapPost("/detect/stream", DetectHandler.HandleStreamAsync)
+               .WithName("DetectStream")
                .Accepts<byte[]>("application/octet-stream");
 
-            app.MapPost("/detect/h265stream", DetectHandler.HandleH265StreamAsync)
-               .WithName("DetectH265Stream")
+            app.MapPost("/recognize/stream/{groupId}", RecognizeHandler.HandleStreamAsync)
+               .WithName("RecognizeStream")
                .Accepts<byte[]>("application/octet-stream");
 
-            app.MapPost("/recognize/image/{groupId}", RecognizeHandler.HandleImageAsync)
-               .WithName("RecognizeImage")
+            // ── 人脸管理 ──────────────────────────────────
+            app.MapPost("/faces/{groupId}/register", FaceGroupHandler.RegisterAsync)
+               .WithName("RegisterFace")
                .Accepts<byte[]>("application/octet-stream");
 
-            app.MapPost("/recognize/imageurl/{groupId}", RecognizeHandler.HandleImageUrlAsync)
-               .WithName("RecognizeImageUrl");
+            app.MapGet("/faces/{groupId}", FaceGroupHandler.ListAsync)
+               .WithName("ListFaces");
 
-            app.MapPost("/recognize/h264stream/{groupId}", RecognizeHandler.HandleH264StreamAsync)
-               .WithName("RecognizeH264Stream")
-               .Accepts<byte[]>("application/octet-stream");
+            app.MapGet("/faces/{groupId}/{faceId}", FaceGroupHandler.GetAsync)
+               .WithName("GetFace");
 
-            app.MapPost("/recognize/h265stream/{groupId}", RecognizeHandler.HandleH265StreamAsync)
-               .WithName("RecognizeH265Stream")
-               .Accepts<byte[]>("application/octet-stream");
+            app.MapDelete("/faces/{groupId}/{faceId}", FaceGroupHandler.DeleteAsync)
+               .WithName("DeleteFace");
 
             app.Run();
         }

@@ -1,152 +1,100 @@
+using FaceFeature.Helpers;
 using FaceFeature.Payloads;
 using FaceFeature.Services;
-using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Options;
 
 namespace FaceFeature.Handlers
 {
     /// <summary>
-    /// 人脸识别处理器 — 检测到的人脸与分组中的人脸逐一比对，流式返回匹配结果
+    /// 人脸识别处理器 — 视频多帧融合后与分组人物比对，一个视频输入只产出一个识别结果
     /// </summary>
     public static class RecognizeHandler
     {
-        private const float SimilarityThreshold = 0.9f;
+        // 默认阈值按门禁摄像头实测标定：同人全量融合约 0.84，单帧最高约 0.88；
+        // 正式上线前请用真实异人样本重新标定（异人正样本低于 0.5 时保持 0.6）
+        private const float SimilarityThreshold = 0.6f;
 
         /// <summary>
-        /// 处理图片识别请求：上传原始图片二进制数据，检测最佳人脸并提取特征后与指定分组内的人物比对
+        /// 处理 H264/H265 视频流识别请求：融合整段流后返回单个识别结果（编码由 VideoDecoder 自动嗅探）
         /// </summary>
-        /// <param name="faceGroupProvider">人脸分组提供者</param>
-        /// <param name="request">HTTP 请求，其 Body 为原始图片二进制数据</param>
+        /// <param name="faceGroupService">人脸分组管理服务</param>
+        /// <param name="context">HTTP 上下文</param>
         /// <param name="detectService">检测编排服务</param>
         /// <param name="logger">日志记录器</param>
+        /// <param name="faceOptions">人脸流水线配置（融合参数）</param>
         /// <param name="groupId">分组 ID</param>
+        /// <param name="frameIntervalSeconds">帧间隔秒数</param>
         /// <param name="similarityThreshold">相似度阈值</param>
+        /// <param name="fusionFrames">融合帧数上限（&gt;0）</param>
         /// <param name="cancellationToken">取消令牌</param>
-        public static async Task<FaceRecognition?> HandleImageAsync(
-            IFaceGroupProvider faceGroupProvider,
+        public static async Task<FaceRecognition?> HandleStreamAsync(
+            FaceGroupService faceGroupService,
+            HttpContext context,
+            DetectService detectService,
+            ILogger<Program> logger,
+            IOptions<FaceFeatureOptions> faceOptions,
+            string groupId,
+            double frameIntervalSeconds = 0.5,
+            float similarityThreshold = SimilarityThreshold,
+            int fusionFrames = 30,
+            CancellationToken cancellationToken = default)
+        {
+            return await RecognizeAsync(
+                faceGroupService, context.Request, detectService, logger, faceOptions, groupId,
+                frameIntervalSeconds, similarityThreshold, fusionFrames, cancellationToken);
+        }
+
+        private static async Task<FaceRecognition?> RecognizeAsync(
+            FaceGroupService faceGroupService,
             HttpRequest request,
             DetectService detectService,
             ILogger<Program> logger,
+            IOptions<FaceFeatureOptions> faceOptions,
             string groupId,
-            float similarityThreshold = SimilarityThreshold,
-            CancellationToken cancellationToken = default)
-        {
-            var persons = await faceGroupProvider.GetPersonsAsync(groupId, cancellationToken);
-            var detection = await DetectHandler.HandleImageAsync(request, detectService, logger, cancellationToken);
-
-            return MatchSingle(persons, detection, similarityThreshold);
-        }
-
-        /// <summary>
-        /// 处理图片 URL 识别请求：通过图片 URL 下载后检测最佳人脸并与分组人物比对
-        /// </summary>
-        public static async Task<FaceRecognition?> HandleImageUrlAsync(
-            IFaceGroupProvider faceGroupProvider,
-            UrlDetectRequest urlRequest,
-            DetectService detectService,
-            ILogger<Program> logger,
-            HttpClient httpClient,
-            string groupId,
-            float similarityThreshold = SimilarityThreshold,
-            CancellationToken cancellationToken = default)
-        {
-            var persons = await faceGroupProvider.GetPersonsAsync(groupId, cancellationToken);
-            var detection = await DetectHandler.HandleImageUrlAsync(urlRequest, detectService, logger, httpClient, cancellationToken);
-
-            return MatchSingle(persons, detection, similarityThreshold);
-        }
-
-        /// <summary>
-        /// 处理 H264 视频流识别请求
-        /// </summary>
-        public static async IAsyncEnumerable<FaceRecognition> HandleH264StreamAsync(
-            IFaceGroupProvider faceGroupProvider,
-            HttpContext context,
-            DetectService detectService,
-            ILogger<Program> logger,
-            string groupId,
-            double frameIntervalSeconds = 5,
-            float similarityThreshold = SimilarityThreshold,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            var persons = await faceGroupProvider.GetPersonsAsync(groupId, cancellationToken);
-            var detections = DetectHandler.HandleH264StreamAsync(context, detectService, logger, frameIntervalSeconds, cancellationToken);
-
-            await foreach (var recognition in RecognizeAsync(persons, detections, similarityThreshold, cancellationToken))
-            {
-                yield return recognition;
-            }
-        }
-
-        /// <summary>
-        /// 处理 H265 视频流识别请求
-        /// </summary>
-        public static async IAsyncEnumerable<FaceRecognition> HandleH265StreamAsync(
-            IFaceGroupProvider faceGroupProvider,
-            HttpContext context,
-            DetectService detectService,
-            ILogger<Program> logger,
-            string groupId,
-            double frameIntervalSeconds = 5,
-            float similarityThreshold = SimilarityThreshold,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            var persons = await faceGroupProvider.GetPersonsAsync(groupId, cancellationToken);
-            var detections = DetectHandler.HandleH265StreamAsync(context, detectService, logger, frameIntervalSeconds, cancellationToken);
-
-            await foreach (var recognition in RecognizeAsync(persons, detections, similarityThreshold, cancellationToken))
-            {
-                yield return recognition;
-            }
-        }
-
-        private static async IAsyncEnumerable<FaceRecognition> RecognizeAsync(
-            FacePerson[] persons,
-            IAsyncEnumerable<FaceDetection> detections,
+            double frameIntervalSeconds,
             float similarityThreshold,
-            [EnumeratorCancellation] CancellationToken cancellationToken)
+            int fusionFrames,
+            CancellationToken cancellationToken)
         {
-            await foreach (var detection in detections.WithCancellation(cancellationToken))
-            {
-                var recognition = MatchPerson(persons, detection, similarityThreshold);
-                if (recognition != null)
-                    yield return recognition;
-            }
-        }
+            var persons = await faceGroupService.GetPersonsAsync(groupId, cancellationToken);
+            var frames = detectService.DetectFramesAsync(request.Body, frameIntervalSeconds, cancellationToken);
 
-        private static FaceRecognition? MatchSingle(
-            FacePerson[] persons,
-            FaceDetection? detection,
-            float similarityThreshold)
-        {
-            if (detection == null) return null;
-            return MatchPerson(persons, detection, similarityThreshold);
+            var fused = await FaceVideoFusion.FuseAsync(
+                frames,
+                fusionFrames > 0 ? fusionFrames : int.MaxValue,
+                faceOptions.Value.Fusion,
+                logger,
+                cancellationToken);
+            if (fused is null)
+            {
+                return null;
+            }
+
+            var match = MatchPerson(persons, fused.Features, similarityThreshold);
+            Log.FaceFusionCompleted(logger, fused.FrameCount, fused.Early, match?.FaceSimilarity ?? 0f);
+            return match;
         }
 
         private static FaceRecognition? MatchPerson(
-            FacePerson[] persons,
-            FaceDetection detection,
+            ReadOnlySpan<FacePerson> persons,
+            ReadOnlySpan<float> features,
             float similarityThreshold)
         {
-            var bestMatch = persons
-                .Select(p => new
-                {
-                    Person = p,
-                    Similarity = p.Similarity(detection.Features)
-                })
-                .Where(i => i.Similarity > similarityThreshold)
-                .OrderByDescending(i => i.Similarity)
-                .FirstOrDefault();
-
-            if (bestMatch != null)
+            FacePerson? bestPerson = null;
+            float bestSimilarity = 0f;
+            foreach (var person in persons)
             {
-                return new FaceRecognition(
-                    bestMatch.Person.Id,
-                    bestMatch.Person.GroupId,
-                    bestMatch.Person.Name,
-                    bestMatch.Similarity);
+                float similarity = person.Similarity(features);
+                if (similarity > similarityThreshold && similarity > bestSimilarity)
+                {
+                    bestSimilarity = similarity;
+                    bestPerson = person;
+                }
             }
 
-            return null;
+            return bestPerson is null
+                ? null
+                : new FaceRecognition(bestPerson.Id, bestPerson.GroupId, bestPerson.Name, bestSimilarity);
         }
     }
 }

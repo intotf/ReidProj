@@ -1,12 +1,13 @@
 {
-  "profiles": {
-    "FaceFeature": {
-      "commandName": "Project",
-      "launchBrowser": true,
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      },
-      "applicationUrl": "https://localhost:63937;http://localhost:63938"
+    "profiles": {
+        "FaceFeature": {
+            "commandName": "Project",
+            "launchBrowser": true,
+            "launchUrl": "http://localhost:9000/swagger",
+            "environmentVariables": {
+                "ASPNETCORE_ENVIRONMENT": "Development"
+            },
+            "applicationUrl": "https://localhost:63937;http://localhost:63938"
+        }
     }
-  }
 }
