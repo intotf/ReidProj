@@ -249,7 +249,7 @@ curl -X DELETE http://localhost:9000/faces/group1/{faceId}
 | `FaceFeature.MinFaceSize` | `80` | 人脸最小尺寸（像素），低于该值的检测框丢弃（小脸特征不可靠） |
 | `FaceFeature.FaceRecognitionModelName` | `glintr100.onnx` | 人脸特征模型文件名（models 目录下） |
 | `FaceFeature.FaceQuality.Enabled` | `true` | 是否启用清晰帧筛选 |
-| `FaceFeature.FaceQuality.SharpnessThreshold` | `10` | 清晰度阈值（Laplacian 方差，按摄像头画质标定） |
+| `FaceFeature.FaceQuality.SharpnessThreshold` | `100` | 清晰度阈值（Laplacian 方差，按摄像头画质标定） |
 | `FaceFeature.Fusion.MinFrames` | `6` | 融合至少积累的帧数（按 5~7 秒门铃短视频标定） |
 | `FaceFeature.Fusion.StabilityCosine` | `0.99` | 相邻融合向量余弦达到该值视为一次“稳定” |
 | `FaceFeature.Fusion.StableRequired` | `2` | 连续稳定次数达到该值提前完成融合 |
