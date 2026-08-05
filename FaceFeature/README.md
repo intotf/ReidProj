@@ -19,7 +19,7 @@
 | ASP.NET Core Minimal API | .NET 10，`WebApplication.CreateSlimBuilder` |
 | Microsoft.ML.OnnxRuntime 1.27.1 | ONNX 推理 |
 | SCRFD-10g | 人脸检测模型（`det_10g.onnx`） |
-| ArcFace R100（glint360k） | 人脸特征提取模型（`glintr100.onnx`，可配置切换） |
+| ArcFace R100（glint360k） | 人脸特征提取模型（`glintr100.onnx`） |
 | SixLabors.ImageSharp 4.x | 图像解码 / 对齐 / 缩放 |
 | ffmpeg | H264/H265 裸流 → BMP 帧流式解码 |
 | System.Numerics.Tensors | 特征融合与余弦相似度计算 |
@@ -71,7 +71,7 @@ python scripts/setup_models.py
 脚本自动从 [InsightFace buffalo_l](https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip) 提取并输出：
 
 - `models/det_10g.onnx` — SCRFD-10g 人脸检测
-- `models/glintr100.onnx` — ArcFace 特征提取（默认；如需切换旧模型，保留 `models/w600k_r50.onnx` 并在 `Onnx:FaceRecognitionModelName` 中指定文件名）
+- `models/glintr100.onnx` — ArcFace 特征提取（如需切换模型，保留对应 onnx 文件并修改代码中的模型常量）
 
 也可以手动放置模型到 `models/` 目录。
 
@@ -247,7 +247,7 @@ curl -X DELETE http://localhost:9000/faces/group1/{faceId}
 | `Onnx.Face.IntraOpNumThreads` | `1` | 检测会话线程数（门禁场景实测建议 2~4，约 2.6 倍提速） |
 | `Onnx.FaceRec.IntraOpNumThreads` | `0` | 特征提取会话线程数（0 = 全部核心） |
 | `FaceFeature.MinFaceSize` | `80` | 人脸最小尺寸（像素），低于该值的检测框丢弃（小脸特征不可靠） |
-| `FaceFeature.FaceRecognitionModelName` | `glintr100.onnx` | 人脸特征模型文件名（models 目录下） |
+| `FaceFeature.ConfidenceThreshold` | `0.6` | 人脸检测置信度阈值（0~1），小脸场景可下调以提升召回 |
 | `FaceFeature.FaceQuality.Enabled` | `true` | 是否启用清晰帧筛选 |
 | `FaceFeature.FaceQuality.SharpnessThreshold` | `100` | 清晰度阈值（Laplacian 方差，按摄像头画质标定） |
 | `FaceFeature.Fusion.MinFrames` | `6` | 融合至少积累的帧数（按 5~7 秒门铃短视频标定） |

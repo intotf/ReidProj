@@ -14,11 +14,14 @@ using System.Numerics.Tensors;
 namespace FaceFeature.Services;
 
 /// <summary>
-/// ArcFace ONNX 人脸特征提取器 — 模型文件名通过 Onnx:FaceRecognitionModelName 配置（默认 glintr100.onnx）
+/// ArcFace ONNX 人脸特征提取器 — 使用 models/glintr100.onnx（如需更换模型请修改代码常量）
 /// 输入 RGB 人脸裁剪图，输出 512 维 L2 归一化特征向量
 /// </summary>
 public sealed class FaceExtractor : IDisposable
 {
+    /// <summary>ArcFace 特征模型文件名（models 目录下），更换模型时修改此常量</summary>
+    private const string ModelFileName = "glintr100.onnx";
+
     private readonly ILogger<FaceExtractor> _logger;
     private readonly InferenceSession _session;
 
@@ -44,26 +47,19 @@ public sealed class FaceExtractor : IDisposable
     /// </summary>
     /// <param name="logger">日志记录器</param>
     /// <param name="onnxOptions">ONNX Runtime 会话配置</param>
-    /// <param name="featureOptions">人脸流水线配置（特征模型文件名）</param>
     /// <exception cref="FileNotFoundException">models 下配置的特征模型未找到时抛出</exception>
-    public FaceExtractor(
-        ILogger<FaceExtractor> logger,
-        IOptions<OnnxSessionOptions> onnxOptions,
-        IOptions<FaceFeatureOptions> featureOptions)
+    public FaceExtractor(ILogger<FaceExtractor> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
 
-        var modelName = string.IsNullOrWhiteSpace(featureOptions.Value.FaceRecognitionModelName)
-            ? "glintr100.onnx"
-            : featureOptions.Value.FaceRecognitionModelName;
-        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", modelName);
+        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", ModelFileName);
         if (!File.Exists(modelPath))
         {
-            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", modelName);
+            modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", ModelFileName);
         }
         if (!File.Exists(modelPath))
         {
-            throw new FileNotFoundException($"请先运行 scripts/setup_models.py 导出人脸特征模型 models/{modelName}", modelPath);
+            throw new FileNotFoundException($"请先运行 scripts/setup_models.py 导出人脸特征模型 models/{ModelFileName}", modelPath);
         }
 
         _session = new InferenceSession(modelPath, onnxOptions.Value.FaceRec);

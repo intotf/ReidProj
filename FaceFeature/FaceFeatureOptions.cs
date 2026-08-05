@@ -12,8 +12,11 @@ public sealed class FaceFeatureOptions
     /// </summary>
     public int MinFaceSize { get; set; } = 80;
 
-    /// <summary>人脸特征模型文件名（models 目录下），默认 glintr100.onnx（ArcFace R100），可切换 w600k_r50.onnx 等</summary>
-    public string FaceRecognitionModelName { get; set; } = "glintr100.onnx";
+    /// <summary>
+    /// 人脸检测置信度阈值（0~1）；低于该值的候选框丢弃。
+    /// 小脸场景可适当下调（如 0.4~0.5）以提升召回，配合融合共识门控抑制误检
+    /// </summary>
+    public float ConfidenceThreshold { get; set; } = 0.6f;
 
     /// <summary>清晰帧筛选配置</summary>
     public FaceQualityOptions FaceQuality { get; set; } = new();
