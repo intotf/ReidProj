@@ -1,5 +1,4 @@
 using ReidFeature.Payloads;
-using ReidFeature.Services;
 using System.Text.Json.Serialization;
 
 namespace ReidFeature
@@ -9,7 +8,8 @@ namespace ReidFeature
     [JsonSerializable(typeof(EnrollResult))]
     [JsonSerializable(typeof(MemberInfo[]))]
     [JsonSerializable(typeof(double))]
-    [JsonSerializable(typeof(FamilyGalleryService.GalleryData))]
+    [JsonSerializable(typeof(byte[]))]
+    [JsonSerializable(typeof(GalleryData))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
 

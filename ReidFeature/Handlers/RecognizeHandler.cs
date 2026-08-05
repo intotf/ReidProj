@@ -5,18 +5,18 @@ using ReidFeature.Services;
 namespace ReidFeature.Handlers
 {
     /// <summary>
-    /// 家庭成员识别处理器 — 视频流 → 四维融合 → 一个最佳匹配
+    /// 家庭成员识别处理器 —— 视频流（编码自动识别）→ 四维融合 → 一个最佳匹配
     /// </summary>
     public static class RecognizeHandler
     {
         /// <summary>命中阈值：四维融合分数超过此值才考虑命中</summary>
         private const float HitThreshold = 0.62f;
 
-        /// <summary>命中与次高分的最小差距</summary>
+        /// <summary>命中与次高分数的最小差距</summary>
         private const float MarginThreshold = 0.08f;
 
         /// <summary>
-        /// 处理 H264 视频流识别 — 收集所有帧后四维融合匹配，只返回最佳结果
+        /// 处理视频流识别（H264/H265 裸流均可，编码自动识别）—— 收集所有帧后四维融合匹配，只返回最佳结果
         /// </summary>
         /// <param name="familyProvider">家庭成员提供者（Gallery 数据源）</param>
         /// <param name="context">HTTP 上下文</param>
@@ -24,13 +24,13 @@ namespace ReidFeature.Handlers
         /// <param name="logger">日志记录器</param>
         /// <param name="groupId">分组 ID</param>
         /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
-        /// <param name="wCloth">全身 ReID 权重（默认 0.20）</param>
-        /// <param name="wHead">头肩 ReID 权重（默认 0.30）</param>
-        /// <param name="wBody">体型标量权重（默认 0.30）</param>
-        /// <param name="wGait">步态标量权重（默认 0.20）</param>
+        /// <param name="wCloth">全身 ReID 权重（默认 0.30）</param>
+        /// <param name="wHead">头肩 ReID 权重（默认 0.40）</param>
+        /// <param name="wBody">体型标量权重（默认 0.20）</param>
+        /// <param name="wGait">步态标量权重（默认 0.10）</param>
         /// <param name="cancellationToken">取消令牌</param>
-        /// <returns>最佳匹配的人物识别结果；请求体为空、Gallery 无成员或视频解码失败时返回 null</returns>
-        public static async Task<PersonRecognition?> HandleH264StreamAsync(
+        /// <returns>最佳匹配的人物识别结果；请求体为空、gallery 无成员或视频解码失败时返回 null</returns>
+        public static async Task<PersonRecognition?> HandleStreamAsync(
             IFamilyMemberProvider familyProvider,
             HttpContext context,
             DetectService detectService,
@@ -42,60 +42,6 @@ namespace ReidFeature.Handlers
             float wBody = TrackFeaturePack.WBody,
             float wGait = TrackFeaturePack.WGait,
             CancellationToken cancellationToken = default)
-        {
-            return await RecognizeVideoAsync(
-                familyProvider, context.Request, detectService, logger,
-                groupId, VideoCodec.H264, frameIntervalSeconds,
-                wCloth, wHead, wBody, wGait, cancellationToken);
-        }
-
-        /// <summary>
-        /// 处理 H265 视频流识别 — 收集所有帧后四维融合匹配，只返回最佳结果
-        /// </summary>
-        /// <param name="familyProvider">家庭成员提供者（Gallery 数据源）</param>
-        /// <param name="context">HTTP 上下文</param>
-        /// <param name="detectService">检测编排服务</param>
-        /// <param name="logger">日志记录器</param>
-        /// <param name="groupId">分组 ID</param>
-        /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
-        /// <param name="wCloth">全身 ReID 权重（默认 0.20）</param>
-        /// <param name="wHead">头肩 ReID 权重（默认 0.30）</param>
-        /// <param name="wBody">体型标量权重（默认 0.30）</param>
-        /// <param name="wGait">步态标量权重（默认 0.20）</param>
-        /// <param name="cancellationToken">取消令牌</param>
-        /// <returns>最佳匹配的人物识别结果；请求体为空、Gallery 无成员或视频解码失败时返回 null</returns>
-        public static async Task<PersonRecognition?> HandleH265StreamAsync(
-            IFamilyMemberProvider familyProvider,
-            HttpContext context,
-            DetectService detectService,
-            ILogger<Program> logger,
-            string groupId,
-            double frameIntervalSeconds = 0.5,
-            float wCloth = TrackFeaturePack.WCloth,
-            float wHead = TrackFeaturePack.WHead,
-            float wBody = TrackFeaturePack.WBody,
-            float wGait = TrackFeaturePack.WGait,
-            CancellationToken cancellationToken = default)
-        {
-            return await RecognizeVideoAsync(
-                familyProvider, context.Request, detectService, logger,
-                groupId, VideoCodec.H265, frameIntervalSeconds,
-                wCloth, wHead, wBody, wGait, cancellationToken);
-        }
-
-        private static async Task<PersonRecognition?> RecognizeVideoAsync(
-            IFamilyMemberProvider familyProvider,
-            HttpRequest request,
-            DetectService detectService,
-            ILogger<Program> logger,
-            string groupId,
-            VideoCodec codec,
-            double frameIntervalSeconds,
-            float wCloth,
-            float wHead,
-            float wBody,
-            float wGait,
-            CancellationToken cancellationToken)
         {
             // 防御无效参数：NaN/±Infinity 统一按 0（解码全部帧）处理，并 clamp 到合理上限
             if (double.IsNaN(frameIntervalSeconds) || double.IsInfinity(frameIntervalSeconds))
@@ -113,7 +59,7 @@ namespace ReidFeature.Handlers
 
             // 2. 解码视频流并逐帧检测/跟踪（统一由 DetectService 处理）
             if (!await detectService.ProcessVideoStreamAsync(
-                request, codec, logger, frameIntervalSeconds, cancellationToken))
+                context.Request, logger, frameIntervalSeconds, cancellationToken))
             {
                 return null;
             }
@@ -165,7 +111,7 @@ namespace ReidFeature.Handlers
                     }
                 }
 
-                // 取所有 Track 中最佳匹配对；margin 依据同一 Track 内次佳成员
+                // 取所有 Track 中最优匹配对；margin 依据同一 Track 内次佳成员
                 if (trackBest > bestScore)
                 {
                     bestScore = trackBest;
@@ -176,7 +122,7 @@ namespace ReidFeature.Handlers
                 }
             }
 
-            // 5. 判决：最高分 > 0.62 且与次高分差 > 0.08
+            // 5. 判定：最高分 > 0.62 且与次高分数差 > 0.08
             if (bestPerson != null && bestScore > HitThreshold &&
                 (bestScore - secondBestScore) > MarginThreshold)
             {

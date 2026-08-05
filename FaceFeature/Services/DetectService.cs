@@ -56,7 +56,14 @@ public sealed class DetectService
         {
             using (image)
             {
-                var detection = DetectBestFace(image, skipBlurry: true);
+                // 上一帧无人脸时，本帧跳过检测，仅消费解码帧以保持 ffmpeg 管道流通
+                if (skipNext)
+                {
+                    skipNext = false;
+                    continue;
+                }
+
+                var detection = DetectBestFace(image);
                 if (detection is not null)
                 {
                     yield return detection;
@@ -68,10 +75,9 @@ public sealed class DetectService
     /// <summary>
     /// 对输入图像检测置信度最高的最佳人脸（性能优先——避免全量特征提取）
     /// </summary>
-    /// <param name="image">输入 RGB 图像</param>
-    /// <param name="skipBlurry">为 true 时，清晰度低于阈值的模糊人脸直接返回 null（视频流逐帧筛选）</param>
+    /// <param name="image">输入 RGB 图像</param> 
     /// <returns>最佳人脸检测结果（含清晰度分数），无人脸或模糊被跳过时返回 null</returns>
-    public FaceDetection? DetectBestFace(Image<Rgb24> image, bool skipBlurry = false)
+    public FaceDetection? DetectBestFace(Image<Rgb24> image)
     {
         var best = _faceDetector.DetectBest(image);
         if (best is null)
@@ -81,7 +87,7 @@ public sealed class DetectService
 
         using var extraction = _faceExtractor.AlignAndScore(image, best);
 
-        if (skipBlurry && _qualityOptions.Enabled && extraction.Sharpness < _qualityOptions.SharpnessThreshold)
+        if (_options.FaceQuality.Enabled && extraction.Sharpness < _options.FaceQuality.SharpnessThreshold)
         {
             Log.FaceSkippedBlurry(_logger, extraction.Sharpness, _qualityOptions.SharpnessThreshold);
             return null;

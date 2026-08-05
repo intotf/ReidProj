@@ -2,7 +2,6 @@ using ReidFeature.Helpers;
 using ReidFeature.Payloads;
 using System.Buffers;
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace ReidFeature.Services;
@@ -199,7 +198,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
         return oldArr[index] * (1 - EmaLambda) + newArr[index] * EmaLambda;
     }
 
-    private static byte[] EmaVector(byte[] oldVec, byte[] newVec)
+    private static float[] EmaVector(float[] oldVec, float[] newVec)
     {
         if (oldVec.Length == 0)
         {
@@ -214,17 +213,15 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
             return newVec;
         }
 
-        var oldF = MemoryMarshal.Cast<byte, float>(oldVec);
-        var newF = MemoryMarshal.Cast<byte, float>(newVec);
-        int floatDim = oldF.Length;
+        int floatDim = oldVec.Length;
         float[] poolBuffer = ArrayPool<float>.Shared.Rent(floatDim);
         try
         {
             Span<float> result = poolBuffer.AsSpan(0, floatDim);
 
-            // result = oldF * (1-λ) + newF * λ（MultiplyAdd 单趟融合）
-            TensorPrimitives.Multiply(oldF, 1 - EmaLambda, result);
-            TensorPrimitives.MultiplyAdd(newF, EmaLambda, result, result);
+            // result = oldVec * (1-λ) + newVec * λ（MultiplyAdd 单趟融合）
+            TensorPrimitives.Multiply(oldVec, 1 - EmaLambda, result);
+            TensorPrimitives.MultiplyAdd(newVec, EmaLambda, result, result);
 
             // L2 归一化
             float norm = TensorPrimitives.Norm(result);
@@ -233,7 +230,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
                 TensorPrimitives.Divide(result, norm, result);
             }
 
-            return MemoryMarshal.Cast<float, byte>(result).ToArray();
+            return result.ToArray();
         }
         finally
         {
@@ -265,7 +262,7 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("Gallery 加载失败: {File}, {Error}", file, ex.Message);
+                Log.GalleryLoadFailed(_logger, file, ex.Message);
             }
         }
     }
@@ -296,20 +293,5 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
     public void Dispose()
     {
         _unknownQueue.Clear();
-    }
-
-    // ── 内部数据模型 ──
-
-    internal sealed class GalleryData
-    {
-        public List<GalleryEntry> Members { get; set; } = [];
-    }
-
-    internal sealed class GalleryEntry
-    {
-        public string Id { get; set; } = "";
-        public string Name { get; set; } = "";
-        public DateTime EnrolledAt { get; set; }
-        public TrackFeaturePack FeaturePack { get; set; } = new();
     }
 }

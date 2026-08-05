@@ -1,4 +1,4 @@
-﻿using ReidFeature.Payloads;
+using ReidFeature.Payloads;
 
 namespace ReidFeature.Services
 {
@@ -10,6 +10,9 @@ namespace ReidFeature.Services
         /// <summary>
         /// 获取指定分组下的所有成员信息
         /// </summary>
+        /// <param name="groupId">分组 ID</param>
+        /// <param name="cancellationToken">取消令牌</param>
+        /// <returns>该分组下的成员数组；分组不存在时返回空数组</returns>
         Task<Person[]> GetMembersAsync(string groupId, CancellationToken cancellationToken);
 
         /// <summary>
@@ -25,16 +28,18 @@ namespace ReidFeature.Services
         /// <summary>
         /// 删除指定成员
         /// </summary>
+        /// <param name="groupId">分组 ID</param>
+        /// <param name="memberId">成员 ID</param>
+        /// <param name="cancellationToken">取消令牌</param>
+        /// <returns>删除成功返回 true；成员或分组不存在时返回 false</returns>
         Task<bool> DeleteAsync(string groupId, string memberId, CancellationToken cancellationToken);
 
         /// <summary>
         /// 列出指定分组的成员信息
         /// </summary>
+        /// <param name="groupId">分组 ID</param>
+        /// <param name="cancellationToken">取消令牌</param>
+        /// <returns>成员摘要信息数组；分组不存在时返回空数组</returns>
         Task<MemberInfo[]> ListAsync(string groupId, CancellationToken cancellationToken);
     }
-
-    /// <summary>
-    /// 成员摘要信息（供列表端点使用）
-    /// </summary>
-    public sealed record MemberInfo(string Id, string Name, DateTime EnrolledAt);
 }

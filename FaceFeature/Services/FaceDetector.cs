@@ -31,6 +31,7 @@ public sealed class FaceDetector : IDisposable
     /// <summary>各特征图的下采样步长（det_10g 固定 [8, 16, 32]）</summary>
     private static readonly int[] Strides = [8, 16, 32];
 
+<<<<<<< HEAD
     // ─── 解码常量 ─────────────────────────────────────────────
 
     /// <summary>人脸置信度过滤阈值</summary>
@@ -39,6 +40,8 @@ public sealed class FaceDetector : IDisposable
     /// <summary>人脸最小尺寸（像素），低于此值的人脸特征不可靠，将被忽略</summary>
     private const int MinFaceSize = 50;
 
+=======
+>>>>>>> 0d9348b8afaaeb08c15a87e8c14b6d72371148cb
     // ─── 预处理常量（SCRFD 归一化）───────────────────────────
 
     /// <summary>SCRFD 预处理的像素均值</summary>
@@ -138,7 +141,14 @@ public sealed class FaceDetector : IDisposable
                 DecodeLevel(
                     scores, bboxes, kpss,
                     stride, NumAnchors, fmSize,
+<<<<<<< HEAD
                     scale, padX, padY, image.Width, image.Height,
+=======
+                    scale, padX, padY,
+                    Math.Max(1, _options.MinFaceSize),
+                    Math.Clamp(_options.ConfidenceThreshold, 0f, 1f),
+                    image.Width, image.Height,
+>>>>>>> 0d9348b8afaaeb08c15a87e8c14b6d72371148cb
                     ref best);
             }
 
@@ -262,13 +272,22 @@ public sealed class FaceDetector : IDisposable
     /// <param name="scale">letterbox 缩放比例</param>
     /// <param name="padX">letterbox 水平填充量</param>
     /// <param name="padY">letterbox 垂直填充量</param>
+<<<<<<< HEAD
+=======
+    /// <param name="minFaceSize">人脸最小尺寸（像素），低于该值的候选框丢弃</param>
+    /// <param name="confidenceThreshold">人脸置信度阈值，低于该值的候选框丢弃</param>
+>>>>>>> 0d9348b8afaaeb08c15a87e8c14b6d72371148cb
     /// <param name="imgW">原图宽度</param>
     /// <param name="imgH">原图高度</param>
     /// <param name="best">当前置信度最高的候选框（尚未找到时为 null）</param>
     private static void DecodeLevel(
         ReadOnlySpan<float> scores, ReadOnlySpan<float> bboxes, ReadOnlySpan<float> kpss,
         int stride, int numAnchors, int fmSize,
+<<<<<<< HEAD
         float scale, float padX, float padY,
+=======
+        float scale, float padX, float padY, int minFaceSize, float confidenceThreshold,
+>>>>>>> 0d9348b8afaaeb08c15a87e8c14b6d72371148cb
         int imgW, int imgH,
         ref Candidate? best)
     {
@@ -278,7 +297,7 @@ public sealed class FaceDetector : IDisposable
         {
             float raw = scores[i];
             float score = 1f / (1f + MathF.Exp(-raw));
-            if (score < ConfidenceThreshold)
+            if (score < confidenceThreshold)
             {
                 continue;
             }

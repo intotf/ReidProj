@@ -6,7 +6,6 @@ using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
 
 namespace ReidFeature.Services;
 
@@ -106,9 +105,9 @@ public sealed class TrackFusionService
             SelectTopFrames(frames, weightsSpan, topFrames, topWeights);
 
             // 全身 ReID 特征（cloth）
-            byte[][] clothFeatures = new byte[topK][];
+            float[][] clothFeatures = new float[topK][];
             // 头肩 ReID 特征（head）
-            byte[][] headFeatures = new byte[topK][];
+            float[][] headFeatures = new float[topK][];
             // 体型标量
             var bodySignals = new (float HeadBody, float ShoulderHip)[topK];
 
@@ -132,8 +131,8 @@ public sealed class TrackFusionService
             });
 
             // 按权重融合特征向量（加权逐元素平均 + L2 归一化）
-            byte[] fusedCloth = WeightedAverageFeatures(clothFeatures, topWeights, totalWeight);
-            byte[] fusedHead = WeightedAverageFeatures(headFeatures, topWeights, totalWeight);
+            float[] fusedCloth = WeightedAverageFeatures(clothFeatures, topWeights, totalWeight);
+            float[] fusedHead = WeightedAverageFeatures(headFeatures, topWeights, totalWeight);
 
             // 体型标量：加权平均
             float[] fusedBody = new float[2];
@@ -211,15 +210,14 @@ public sealed class TrackFusionService
     /// 加权融合特征向量 — 逐元素加权平均后 L2 归一化
     /// 累加缓冲从 ArrayPool 租借，MultiplyAdd 单趟 SIMD 融合
     /// </summary>
-    private static byte[] WeightedAverageFeatures(ReadOnlySpan<byte[]> features, ReadOnlySpan<float> weights, float totalWeight)
+    private static float[] WeightedAverageFeatures(ReadOnlySpan<float[]> features, ReadOnlySpan<float> weights, float totalWeight)
     {
         if (features.Length == 0 || features[0].Length == 0)
         {
             return [];
         }
 
-        int dim = features[0].Length;
-        int floatDim = dim / 4;
+        int floatDim = features[0].Length;
         float[] poolBuffer = ArrayPool<float>.Shared.Rent(floatDim);
         try
         {
@@ -229,14 +227,13 @@ public sealed class TrackFusionService
 
             for (int i = 0; i < features.Length; i++)
             {
-                if (features[i] == null || features[i].Length != dim)
+                if (features[i] == null || features[i].Length != floatDim)
                 {
                     continue;
                 }
                 float w = weights[i] / totalWeight;
-                var vec = MemoryMarshal.Cast<byte, float>(features[i]);
-                // 单趟融合: avg = avg + vec * w（destination 与 addend 重叠）
-                TensorPrimitives.MultiplyAdd(vec, w, avg, avg);
+                // 单趟融合: avg = avg + features[i] * w（destination 与 addend 重叠）
+                TensorPrimitives.MultiplyAdd(features[i], w, avg, avg);
             }
 
             // L2 归一化
@@ -246,7 +243,7 @@ public sealed class TrackFusionService
                 TensorPrimitives.Divide(avg, norm, avg);
             }
 
-            return MemoryMarshal.Cast<float, byte>(avg).ToArray();
+            return avg.ToArray();
         }
         finally
         {
@@ -296,12 +293,16 @@ public sealed class TrackFusionService
         // 水平摆幅：X 位置的标准差
         float meanX = 0f;
         for (int i = 0; i < centers.Length; i++)
+        {
             meanX += centers[i].X;
+        }
         meanX /= centers.Length;
 
         float varianceX = 0f;
         for (int i = 0; i < centers.Length; i++)
+        {
             varianceX += (centers[i].X - meanX) * (centers[i].X - meanX);
+        }
         varianceX /= centers.Length;
         float swingAmplitude = MathF.Sqrt(varianceX);
 

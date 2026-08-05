@@ -8,21 +8,8 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System.Buffers;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace ReidFeature.Services;
-
-/// <summary>
-/// 裁剪类型
-/// </summary>
-public enum CropType
-{
-    /// <summary>全身裁剪（默认，bbox 全范围）</summary>
-    FullBody,
-
-    /// <summary>头肩区域裁剪（取 bbox 上半 38%，换衣鲁棒）</summary>
-    HeadShoulder,
-}
 
 /// <summary>
 /// FastReID ONNX 特征提取器 — 接收原图+人物框，输出归一化特征向量
@@ -69,7 +56,7 @@ public sealed class ReIdExtractor : IDisposable
     /// <param name="personRect">人物边界框（原图坐标）</param>
     /// <param name="cropType">裁剪类型：FullBody（全身）或 HeadShoulder（头肩）</param>
     /// <returns>L2 归一化的特征向量</returns>
-    public byte[] ExtractFeatures(Image<Rgb24> sourceImage, BoundingBox personRect, CropType cropType = CropType.FullBody)
+    public float[] ExtractFeatures(Image<Rgb24> sourceImage, BoundingBox personRect, CropType cropType = CropType.FullBody)
     {
         var sw = Stopwatch.StartNew();
 
@@ -127,7 +114,7 @@ public sealed class ReIdExtractor : IDisposable
             var resultTensor = (DenseTensor<float>)results[0].AsTensor<float>();
 
             Log.ReIdFeatureExtracted(_logger, resultTensor.Length, sw.Elapsed.TotalMilliseconds);
-            return MemoryMarshal.Cast<float, byte>(resultTensor.Buffer.Span).ToArray();
+            return resultTensor.Buffer.Span.ToArray();
         }
         finally
         {

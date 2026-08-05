@@ -6,12 +6,12 @@ namespace ReidFeature.Handlers;
 
 /// <summary>
 /// 家庭成员注册处理器
-/// 上传 H264/H265 视频流 → 检测 → 跟踪 → 特征融合 → 存入 Gallery
+/// 上传 H264/H265 视频流（编码自动识别）→ 检测 → 跟踪 → 特征融合 → 存入 Gallery
 /// </summary>
 public static class EnrollmentHandler
 {
     /// <summary>
-    /// 处理 H264 视频流注册
+    /// 处理视频流注册（H264/H265 裸流均可，编码自动识别）
     /// </summary>
     /// <param name="familyProvider">家庭成员提供者（Gallery 数据源）</param>
     /// <param name="context">HTTP 上下文</param>
@@ -22,7 +22,7 @@ public static class EnrollmentHandler
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>注册结果（成员 ID、名称、分组）；请求体为空、memberName 为空、未检测到人物或特征提取失败时返回 BadRequest</returns>
-    public static async Task<IResult> HandleH264EnrollAsync(
+    public static async Task<IResult> HandleEnrollAsync(
         IFamilyMemberProvider familyProvider,
         HttpContext context,
         DetectService detectService,
@@ -31,49 +31,6 @@ public static class EnrollmentHandler
         string memberName,
         double frameIntervalSeconds = 0.5,
         CancellationToken cancellationToken = default)
-    {
-        return await EnrollVideoAsync(
-            familyProvider, context, detectService, logger,
-            groupId, memberName, VideoCodec.H264, frameIntervalSeconds, cancellationToken);
-    }
-
-    /// <summary>
-    /// 处理 H265 视频流注册
-    /// </summary>
-    /// <param name="familyProvider">家庭成员提供者（Gallery 数据源）</param>
-    /// <param name="context">HTTP 上下文</param>
-    /// <param name="detectService">检测编排服务</param>
-    /// <param name="logger">日志记录器</param>
-    /// <param name="groupId">分组 ID</param>
-    /// <param name="memberName">成员名称</param>
-    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>注册结果（成员 ID、名称、分组）；请求体为空、memberName 为空、未检测到人物或特征提取失败时返回 BadRequest</returns>
-    public static async Task<IResult> HandleH265EnrollAsync(
-        IFamilyMemberProvider familyProvider,
-        HttpContext context,
-        DetectService detectService,
-        ILogger<Program> logger,
-        string groupId,
-        string memberName,
-        double frameIntervalSeconds = 0.5,
-        CancellationToken cancellationToken = default)
-    {
-        return await EnrollVideoAsync(
-            familyProvider, context, detectService, logger,
-            groupId, memberName, VideoCodec.H265, frameIntervalSeconds, cancellationToken);
-    }
-
-    private static async Task<IResult> EnrollVideoAsync(
-        IFamilyMemberProvider familyProvider,
-        HttpContext context,
-        DetectService detectService,
-        ILogger<Program> logger,
-        string groupId,
-        string memberName,
-        VideoCodec codec,
-        double frameIntervalSeconds,
-        CancellationToken cancellationToken)
     {
         var request = context.Request;
 
@@ -91,12 +48,12 @@ public static class EnrollmentHandler
 
         // 处理视频流（解码 → 逐帧检测/跟踪/缓存，统一由 DetectService 处理）
         if (!await detectService.ProcessVideoStreamAsync(
-            request, codec, logger, frameIntervalSeconds, cancellationToken))
+            request, logger, frameIntervalSeconds, cancellationToken))
         {
             return Results.BadRequest("视频解码失败");
         }
 
-        // 获取完成的 Track（取主导 Track）
+        // 获取完成的 Track（取主 Track）
         var tracks = detectService.FlushCompletedTracks();
         if (tracks.Count == 0)
         {
@@ -114,8 +71,7 @@ public static class EnrollmentHandler
         var memberId = await familyProvider.EnrollAsync(
             groupId, memberName, bestTrack.FeaturePack, cancellationToken);
 
-        logger.LogInformation("成员 {Name} 注册成功，ID={Id}，Group={Group}",
-            memberName, memberId, groupId);
+        Log.MemberEnrolled(logger, memberName, memberId, groupId);
 
         return Results.Ok(new EnrollResult(memberId, memberName, groupId));
     }

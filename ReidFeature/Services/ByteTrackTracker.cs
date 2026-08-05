@@ -1,4 +1,6 @@
+using ReidFeature.Helpers;
 using SixLabors.ImageSharp;
+using System.Runtime.InteropServices;
 
 namespace ReidFeature.Services;
 
@@ -22,9 +24,9 @@ public sealed class ByteTrackTracker
     /// <summary>
     /// 使用当前帧检测结果更新跟踪器
     /// </summary>
-    /// <param name="detections">当前帧检测到的人物 bbox 列表</param>
+    /// <param name="detections">当前帧检测到的人物 bbox 序列</param>
     /// <returns>跟踪结果列表 (trackId, bbox)</returns>
-    public List<(int TrackId, Rectangle Bbox)> Update(List<(Rectangle Bbox, float Score)> detections)
+    public List<(int TrackId, Rectangle Bbox)> Update(ReadOnlySpan<(Rectangle Bbox, float Score)> detections)
     {
         // 1. 所有活跃 Track 做预测
         foreach (var track in _tracks.Values)
@@ -36,7 +38,7 @@ public sealed class ByteTrackTracker
         // 2. 第一次关联: 高分 Track ↔ 高分检测 (IoU ≥ 0.5)
         //    所有检测统一携带 detections 中的原始索引，确保匹配结果索引与 detections 对齐
         var highScoreDets = new List<(int Idx, Rectangle Bbox, float Score)>();
-        for (int i = 0; i < detections.Count; i++)
+        for (int i = 0; i < detections.Length; i++)
         {
             if (detections[i].Score >= 0.5f)
             {
@@ -44,17 +46,28 @@ public sealed class ByteTrackTracker
             }
         }
         var activeTracks = _tracks.Values.Where(t => !t.IsRemoved).ToList();
-        var matched1 = LinearAssignment(activeTracks, highScoreDets);
+        var matched1 = LinearAssignment(
+            CollectionsMarshal.AsSpan(activeTracks),
+            CollectionsMarshal.AsSpan(highScoreDets));
 
         // 3. 第二次关联: 未匹配 Track ↔ 未匹配高分检测 + 低分检测
         var unmatchedTracks = activeTracks.Where(t => !matched1.MatchedTracks.Contains(t)).ToList();
+        var lowScoreDets = new List<(int Idx, Rectangle Bbox, float Score)>();
+        for (int i = 0; i < detections.Length; i++)
+        {
+            if (detections[i].Score < 0.5f)
+            {
+                lowScoreDets.Add((i, detections[i].Bbox, detections[i].Score));
+            }
+        }
         var unmatchedDetections = highScoreDets
             .Where(t => !matched1.MatchedDetIndices.Contains(t.Idx))
-            .Concat(detections
-                .Select((d, i) => (Idx: i, d.Bbox, d.Score))
-                .Where(t => t.Score < 0.5f))
+            .Concat(lowScoreDets)
             .ToList();
-        var matched2 = IoUMatching(unmatchedTracks, unmatchedDetections, 0.5f);
+        var matched2 = IoUMatching(
+            CollectionsMarshal.AsSpan(unmatchedTracks),
+            CollectionsMarshal.AsSpan(unmatchedDetections),
+            0.5f);
 
         // 4. 处理未匹配的 Track → 标记为丢失
         foreach (var track in unmatchedTracks.Where(t => !matched2.MatchedTracks.Contains(t)))
@@ -74,7 +87,7 @@ public sealed class ByteTrackTracker
 
         // 5. 处理未匹配的检测 → 创建新 Track
         var allMatchedDets = matched1.MatchedDetIndices.Concat(matched2.MatchedDetIndices).ToHashSet();
-        for (int i = 0; i < detections.Count; i++)
+        for (int i = 0; i < detections.Length; i++)
         {
             if (allMatchedDets.Contains(i))
             {
@@ -134,7 +147,9 @@ public sealed class ByteTrackTracker
             .Select(kv => kv.Key)
             .ToList();
         foreach (var id in flushedIds)
+        {
             _tracks.Remove(id);
+        }
 
         _completedTracks.Clear();
         return result;
@@ -144,18 +159,18 @@ public sealed class ByteTrackTracker
     /// 匈牙利算法线性分配 — 基于 IoU 代价矩阵
     /// </summary>
     private static (List<Tracklet> MatchedTracks, HashSet<int> MatchedDetIndices) LinearAssignment(
-        List<Tracklet> tracks, List<(int Idx, Rectangle Bbox, float Score)> detections)
+        ReadOnlySpan<Tracklet> tracks, ReadOnlySpan<(int Idx, Rectangle Bbox, float Score)> detections)
     {
         var matchedTracks = new List<Tracklet>();
         var matchedDetIndices = new HashSet<int>();
 
-        if (tracks.Count == 0 || detections.Count == 0)
+        if (tracks.Length == 0 || detections.Length == 0)
         {
             return (matchedTracks, matchedDetIndices);
         }
 
         // 构建 IoU 代价矩阵
-        int n = tracks.Count, m = detections.Count;
+        int n = tracks.Length, m = detections.Length;
         var costMatrix = new float[n, m];
         for (int i = 0; i < n; i++)
         {
@@ -193,7 +208,7 @@ public sealed class ByteTrackTracker
     /// IoU 匹配（第二次关联用更高阈值）
     /// </summary>
     private static (List<Tracklet> MatchedTracks, HashSet<int> MatchedDetIndices) IoUMatching(
-        List<Tracklet> tracks, List<(int Idx, Rectangle Bbox, float Score)> detections, float threshold)
+        ReadOnlySpan<Tracklet> tracks, ReadOnlySpan<(int Idx, Rectangle Bbox, float Score)> detections, float threshold)
     {
         var matchedTracks = new List<Tracklet>();
         var matchedDetIndices = new HashSet<int>();
@@ -203,9 +218,11 @@ public sealed class ByteTrackTracker
             float bestIoU = threshold;
             int bestIdx = -1;
 
-            for (int j = 0; j < detections.Count; j++)
+            for (int j = 0; j < detections.Length; j++)
             {
-                if (matchedDetIndices.Contains(j))
+                // matchedDetIndices 存放的是原始检测索引（detections[j].Idx），
+                // 必须按原始索引判重，不能按列表内位置 j 判重（二者通常不一致）。
+                if (matchedDetIndices.Contains(detections[j].Idx))
                 {
                     continue;
                 }
@@ -272,11 +289,15 @@ public sealed class ByteTrackTracker
         public bool IsRemoved { get; set; }
         public bool IsActive => HitStreak >= MinHitStreak;
 
-        public PointF[] CenterHistory => [.. _centerHistory];
+        public ReadOnlySpan<PointF> CenterHistory => CollectionsMarshal.AsSpan(_centerHistory);
         private readonly List<PointF> _centerHistory = [];
 
         private readonly KalmanFilter8 _kalman;
 
+        /// <summary>以首帧检测框初始化 Tracklet。</summary>
+        /// <param name="id">Track ID</param>
+        /// <param name="bbox">首帧检测框</param>
+        /// <param name="score">首帧检测置信度</param>
         public Tracklet(int id, Rectangle bbox, float score)
         {
             TrackId = id;
@@ -292,6 +313,9 @@ public sealed class ByteTrackTracker
             _kalman = new KalmanFilter8(cx, cy, bbox.Width, bbox.Height);
         }
 
+        /// <summary>用当前帧检测框更新 Tracklet 状态。</summary>
+        /// <param name="bbox">当前帧检测框</param>
+        /// <param name="score">当前帧检测置信度</param>
         public void Update(Rectangle bbox, float score)
         {
             LastBbox = bbox;
@@ -304,6 +328,7 @@ public sealed class ByteTrackTracker
             _kalman.Update([cx, cy, bbox.Width, bbox.Height]);
         }
 
+        /// <summary>执行卡尔曼预测并更新预测框。</summary>
         public void KalmanPredict()
         {
             var pred = _kalman.Predict();
@@ -320,101 +345,139 @@ public sealed class ByteTrackTracker
     /// </summary>
     private sealed class KalmanFilter8
     {
-        private float[,] _F;  // 状态转移矩阵 (8x8)
-        private float[,] _H;  // 观测矩阵 (4x8)
-        private float[,] _P;  // 协方差矩阵 (8x8)
-        private float[,] _Q;  // 过程噪声 (8x8)
-        private float[,] _R;  // 观测噪声 (4x4)
+        private float[,] _f;  // 状态转移矩阵 (8x8)
+        private float[,] _h;  // 观测矩阵 (4x8)
+        private float[,] _p;  // 协方差矩阵 (8x8)
+        private float[,] _q;  // 过程噪声 (8x8)
+        private float[,] _r;  // 观测噪声 (4x4)
         private float[] _x;   // 状态向量 (8)
 
+        /// <summary>以目标初始状态初始化 8 维卡尔曼滤波器。</summary>
+        /// <param name="cx">中心点 X</param>
+        /// <param name="cy">中心点 Y</param>
+        /// <param name="w">宽度</param>
+        /// <param name="h">高度</param>
         public KalmanFilter8(float cx, float cy, float w, float h)
         {
             _x = new float[8] { cx, cy, w, h, 0, 0, 0, 0 };
 
-            _F = new float[8, 8];
-            _H = new float[4, 8];
-            _P = new float[8, 8];
-            _Q = new float[8, 8];
-            _R = new float[4, 4];
+            _f = new float[8, 8];
+            _h = new float[4, 8];
+            _p = new float[8, 8];
+            _q = new float[8, 8];
+            _r = new float[4, 4];
 
             // F: 恒速模型
-            for (int i = 0; i < 8; i++) _F[i, i] = 1;
-            _F[0, 4] = 1; _F[1, 5] = 1; _F[2, 6] = 1; _F[3, 7] = 1;
+            for (int i = 0; i < 8; i++)
+            {
+                _f[i, i] = 1;
+            }
+            _f[0, 4] = 1; _f[1, 5] = 1; _f[2, 6] = 1; _f[3, 7] = 1;
 
             // H: 观测矩阵
-            for (int i = 0; i < 4; i++) _H[i, i] = 1;
+            for (int i = 0; i < 4; i++)
+            {
+                _h[i, i] = 1;
+            }
 
             // P: 初始协方差
-            for (int i = 0; i < 8; i++) _P[i, i] = 10;
+            for (int i = 0; i < 8; i++)
+            {
+                _p[i, i] = 10;
+            }
 
             // Q: 过程噪声
-            for (int i = 0; i < 4; i++) _Q[i, i] = 0.01f;
-            for (int i = 4; i < 8; i++) _Q[i, i] = 0.01f;
+            for (int i = 0; i < 4; i++)
+            {
+                _q[i, i] = 0.01f;
+            }
+            for (int i = 4; i < 8; i++)
+            {
+                _q[i, i] = 0.01f;
+            }
 
             // R: 观测噪声
-            for (int i = 0; i < 4; i++) _R[i, i] = 0.1f;
+            for (int i = 0; i < 4; i++)
+            {
+                _r[i, i] = 0.1f;
+            }
         }
 
+        /// <summary>执行状态与协方差预测。</summary>
+        /// <returns>预测后的状态向量 (cx, cy, w, h, vx, vy, vw, vh)</returns>
         public float[] Predict()
         {
-            // _x = _F @ _x
+            // _x = _f @ _x
             var newX = new float[8];
             for (int i = 0; i < 8; i++)
             {
                 float sum = 0;
                 for (int j = 0; j < 8; j++)
-                    sum += _F[i, j] * _x[j];
+                {
+                    sum += _f[i, j] * _x[j];
+                }
                 newX[i] = sum;
             }
             _x = newX;
 
-            // _P = _F @ _P @ _F^T + _Q
-            var FP = Multiply(_F, _P);
-            var FT = Transpose(_F);
+            // _p = _f @ _p @ _f^T + _q
+            var FP = Multiply(_f, _p);
+            var FT = Transpose(_f);
             var FPF = Multiply(FP, FT);
-            _P = Add(FPF, _Q);
+            _p = Add(FPF, _q);
 
             return _x;
         }
 
+        /// <summary>用观测向量执行卡尔曼更新。</summary>
+        /// <param name="z">观测向量 (cx, cy, w, h)</param>
         public void Update(ReadOnlySpan<float> z)
         {
-            // y = z - _H @ _x
+            // y = z - _h @ _x
             var Hx = new float[4];
             for (int i = 0; i < 4; i++)
             {
                 float sum = 0;
                 for (int j = 0; j < 8; j++)
-                    sum += _H[i, j] * _x[j];
+                {
+                    sum += _h[i, j] * _x[j];
+                }
                 Hx[i] = sum;
             }
 
             var y = new float[4];
             for (int i = 0; i < 4; i++)
+            {
                 y[i] = z[i] - Hx[i];
+            }
 
-            // S = _H @ _P @ _H^T + _R
-            var HP = Multiply(_H, _P);
-            var HT = Transpose(_H);
+            // S = _h @ _p @ _h^T + _r
+            var HP = Multiply(_h, _p);
+            var HT = Transpose(_h);
             var HPH = Multiply(HP, HT);
-            var S = Add(HPH, _R);
+            var S = Add(HPH, _r);
 
-            // K = _P @ _H^T @ inv(S)
-            var PHt = Multiply(_P, HT);
+            // K = _p @ _h^T @ inv(S)
+            var PHt = Multiply(_p, HT);
             var SInv = Invert4x4(S);
             var K = Multiply(PHt, SInv);
 
             // _x = _x + K @ y
             var Ky = Multiply(K, y);
             for (int i = 0; i < 8; i++)
+            {
                 _x[i] += Ky[i];
+            }
 
-            // _P = (I - K @ _H) @ _P
-            var KH = Multiply(K, _H);
+            // _p = (I - K @ _h) @ _p
+            var KH = Multiply(K, _h);
             var I = new float[8, 8];
-            for (int i = 0; i < 8; i++) I[i, i] = 1;
+            for (int i = 0; i < 8; i++)
+            {
+                I[i, i] = 1;
+            }
             var I_KH = Subtract(I, KH);
-            _P = Multiply(I_KH, _P);
+            _p = Multiply(I_KH, _p);
         }
 
         // ── 矩阵辅助运算 ──
@@ -424,13 +487,17 @@ public sealed class ByteTrackTracker
             int n = a.GetLength(0), m = a.GetLength(1), p = b.GetLength(1);
             var result = new float[n, p];
             for (int i = 0; i < n; i++)
+            {
                 for (int j = 0; j < p; j++)
                 {
                     float sum = 0;
                     for (int k = 0; k < m; k++)
+                    {
                         sum += a[i, k] * b[k, j];
+                    }
                     result[i, j] = sum;
                 }
+            }
             return result;
         }
 
@@ -442,7 +509,9 @@ public sealed class ByteTrackTracker
             {
                 float sum = 0;
                 for (int j = 0; j < m; j++)
+                {
                     sum += a[i, j] * v[j];
+                }
                 result[i] = sum;
             }
             return result;
@@ -453,8 +522,12 @@ public sealed class ByteTrackTracker
             int n = a.GetLength(0), m = a.GetLength(1);
             var result = new float[m, n];
             for (int i = 0; i < n; i++)
+            {
                 for (int j = 0; j < m; j++)
+                {
                     result[j, i] = a[i, j];
+                }
+            }
             return result;
         }
 
@@ -463,8 +536,12 @@ public sealed class ByteTrackTracker
             int n = a.GetLength(0), m = a.GetLength(1);
             var result = new float[n, m];
             for (int i = 0; i < n; i++)
+            {
                 for (int j = 0; j < m; j++)
+                {
                     result[i, j] = a[i, j] + b[i, j];
+                }
+            }
             return result;
         }
 
@@ -473,8 +550,12 @@ public sealed class ByteTrackTracker
             int n = a.GetLength(0), m = a.GetLength(1);
             var result = new float[n, m];
             for (int i = 0; i < n; i++)
+            {
                 for (int j = 0; j < m; j++)
+                {
                     result[i, j] = a[i, j] - b[i, j];
+                }
+            }
             return result;
         }
 
@@ -487,7 +568,9 @@ public sealed class ByteTrackTracker
             for (int i = 0; i < n; i++)
             {
                 for (int j = 0; j < n; j++)
+                {
                     a[i, j] = m[i, j];
+                }
                 b[i, i] = 1;
             }
 
@@ -536,128 +619,5 @@ public sealed class ByteTrackTracker
 
             return b;
         }
-    }
-}
-
-/// <summary>
-/// 匈牙利算法求解器（最小化指派问题，O(n³)）
-/// </summary>
-internal static class HungarianSolver
-{
-    /// <summary>
-    /// 求解最小化指派问题
-    /// </summary>
-    /// <param name="cost">n×m 代价矩阵</param>
-    /// <returns>长度为 n 的数组，result[i] = 分配给第 i 行的列索引，无指派则为 -1</returns>
-    public static int[] Solve(float[,] cost)
-    {
-        int n = cost.GetLength(0);
-        int m = cost.GetLength(1);
-        int size = Math.Max(n, m);
-
-        // 扩展为方阵
-        var a = new float[size, size];
-        float maxCost = float.MinValue;
-        for (int i = 0; i < n; i++)
-            for (int j = 0; j < m; j++)
-            {
-                a[i, j] = cost[i, j];
-                if (cost[i, j] > maxCost)
-                {
-                    maxCost = cost[i, j];
-                }
-            }
-        // 填充扩展行/列为大值（最小化问题中避免匹配到虚拟行列）
-        float big = maxCost + 1;
-        for (int i = 0; i < size; i++)
-            for (int j = 0; j < size; j++)
-            {
-                if (i >= n || j >= m)
-                {
-                    a[i, j] = big;
-                }
-            }
-
-        // 标准 Hungarian 算法 (Munkres)
-        var u = new float[size];
-        var v = new float[size];
-        var p = new int[size];
-        var way = new int[size];
-
-        for (int i = 0; i < size; i++)
-        {
-            p[0] = i;
-            int j0 = 0;
-            var minv = new float[size];
-            var used = new bool[size];
-
-            for (int j = 0; j < size; j++)
-            {
-                minv[j] = float.MaxValue;
-                used[j] = false;
-            }
-
-            do
-            {
-                used[j0] = true;
-                int i0 = p[j0];
-                float delta = float.MaxValue;
-                int j1 = 0;
-
-                for (int j = 1; j < size; j++)
-                {
-                    if (!used[j])
-                    {
-                        float cur = a[i0, j] - u[i0] - v[j];
-                        if (cur < minv[j])
-                        {
-                            minv[j] = cur;
-                            way[j] = j0;
-                        }
-                        if (minv[j] < delta)
-                        {
-                            delta = minv[j];
-                            j1 = j;
-                        }
-                    }
-                }
-
-                for (int j = 0; j < size; j++)
-                {
-                    if (used[j])
-                    {
-                        u[p[j]] += delta;
-                        v[j] -= delta;
-                    }
-                    else
-                    {
-                        minv[j] -= delta;
-                    }
-                }
-
-                j0 = j1;
-            } while (p[j0] != 0);
-
-            // 增广
-            do
-            {
-                int j1 = way[j0];
-                p[j0] = p[j1];
-                j0 = j1;
-            } while (j0 != 0);
-        }
-
-        // 提取结果
-        var result = new int[n];
-        Array.Fill(result, -1);
-        for (int j = 1; j < size; j++)
-        {
-            if (p[j] < n && j < m)
-            {
-                result[p[j]] = j;
-            }
-        }
-
-        return result;
     }
 }

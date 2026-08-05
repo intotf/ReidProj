@@ -14,11 +14,14 @@ public sealed class OnnxSessionOptions
     /// <summary>MoveNet 姿态估计配置</summary>
     public Microsoft.ML.OnnxRuntime.SessionOptions Pose { get; set; } = Default();
 
-    private static Microsoft.ML.OnnxRuntime.SessionOptions Default() => new()
+    private static Microsoft.ML.OnnxRuntime.SessionOptions Default()
     {
-        IntraOpNumThreads = 1,
-        InterOpNumThreads = 1,
-        ExecutionMode = Microsoft.ML.OnnxRuntime.ExecutionMode.ORT_SEQUENTIAL,
-        GraphOptimizationLevel = Microsoft.ML.OnnxRuntime.GraphOptimizationLevel.ORT_ENABLE_ALL,
-    };
+        return new Microsoft.ML.OnnxRuntime.SessionOptions
+        {
+            IntraOpNumThreads = 1,
+            InterOpNumThreads = 1,
+            ExecutionMode = Microsoft.ML.OnnxRuntime.ExecutionMode.ORT_SEQUENTIAL,
+            GraphOptimizationLevel = Microsoft.ML.OnnxRuntime.GraphOptimizationLevel.ORT_ENABLE_ALL,
+        };
+    }
 }

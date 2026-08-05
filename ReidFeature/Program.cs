@@ -59,30 +59,18 @@ namespace ReidFeature
                .WithName("HealthCheck");
 
             // ── 检测端点（仅视频流） ──────────────────────
-            app.MapPost("/detect/h264stream", DetectHandler.HandleH264StreamAsync)
-               .WithName("DetectH264Stream")
-               .Accepts<byte[]>("application/octet-stream");
-
-            app.MapPost("/detect/h265stream", DetectHandler.HandleH265StreamAsync)
-               .WithName("DetectH265Stream")
+            app.MapPost("/detect/stream", DetectHandler.HandleStreamAsync)
+               .WithName("DetectStream")
                .Accepts<byte[]>("application/octet-stream");
 
             // ── 识别端点（仅视频流，返回单个最佳匹配） ────
-            app.MapPost("/recognize/h264stream/{groupId}", RecognizeHandler.HandleH264StreamAsync)
-               .WithName("RecognizeH264Stream")
-               .Accepts<byte[]>("application/octet-stream");
-
-            app.MapPost("/recognize/h265stream/{groupId}", RecognizeHandler.HandleH265StreamAsync)
-               .WithName("RecognizeH265Stream")
+            app.MapPost("/recognize/{groupId}", RecognizeHandler.HandleStreamAsync)
+               .WithName("RecognizeStream")
                .Accepts<byte[]>("application/octet-stream");
 
             // ── 家庭成员管理端点 ─────────────────────────
-            app.MapPost("/family/enroll/h264/{groupId}/{memberName}", EnrollmentHandler.HandleH264EnrollAsync)
-               .WithName("FamilyEnrollH264")
-               .Accepts<byte[]>("application/octet-stream");
-
-            app.MapPost("/family/enroll/h265/{groupId}/{memberName}", EnrollmentHandler.HandleH265EnrollAsync)
-               .WithName("FamilyEnrollH265")
+            app.MapPost("/family/enroll/{groupId}/{memberName}", EnrollmentHandler.HandleEnrollAsync)
+               .WithName("FamilyEnroll")
                .Accepts<byte[]>("application/octet-stream");
 
             app.MapDelete("/family/{groupId}/{memberId}", async (
