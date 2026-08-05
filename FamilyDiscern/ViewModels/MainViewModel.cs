@@ -120,38 +120,52 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            foreach (var groupId in HistoryGroups)
+            var registeredByGroup = new Dictionary<string, IReadOnlyCollection<FamilyMember>>(
+                StringComparer.Ordinal);
+            var remoteMembers = new List<FamilyMember>();
+            var failedGroupCount = 0;
+
+            foreach (var groupId in HistoryGroups
+                         .Where(g => !string.IsNullOrWhiteSpace(g))
+                         .Distinct(StringComparer.Ordinal)
+                         .ToArray())
             {
-                if (string.IsNullOrWhiteSpace(groupId)) continue;
                 try
                 {
                     var list = await _reidClient.ListMembersAsync(groupId);
-                    var store = LocalMemberStore.Load();
-
-                    foreach (var m in list)
+                    foreach (var member in list)
                     {
-                        // 用查询时的组名填充
-                        if (string.IsNullOrEmpty(m.GroupId))
-                            m.GroupId = groupId;
-
-                        // 从本地记录补充额外信息
-                        var local = store.Find(m.Id);
-                        if (local != null)
-                        {
-                            m.Mp4Path = local.Mp4Path;
-                            m.FrameIntervalSeconds = local.FrameIntervalSeconds;
-                            m.RegisterTime = local.RegisterTime;
-                        }
-
-                        Members.Add(m);
+                        member.GroupId = groupId;
                     }
+
+                    registeredByGroup[groupId] = list;
+                    remoteMembers.AddRange(list);
                 }
                 catch
                 {
-                    // 单个组查询失败不影响其他组
+                    // 查询失败的组不参与同步，避免网络故障导致本地记录被误删。
+                    failedGroupCount++;
                 }
             }
-            StatusText = $"查询完成: 共 {Members.Count} 个成员";
+
+            // 远端注册列表是权威数据；同步会删除成功查询组中的陈旧本地记录。
+            var store = LocalMemberStore.Synchronize(registeredByGroup);
+            foreach (var member in remoteMembers)
+            {
+                var local = store.Find(member.GroupId, member.Id);
+                if (local != null)
+                {
+                    member.Mp4Path = local.Mp4Path;
+                    member.FrameIntervalSeconds = local.FrameIntervalSeconds;
+                    member.RegisterTime = local.RegisterTime;
+                }
+
+                Members.Add(member);
+            }
+
+            StatusText = failedGroupCount == 0
+                ? $"查询并同步完成: 共 {Members.Count} 个成员"
+                : $"同步完成: 共 {Members.Count} 个成员，{failedGroupCount} 个组查询失败";
         }
         catch (Exception ex)
         {
@@ -176,9 +190,7 @@ public partial class MainViewModel : ViewModelBase
             if (ok)
             {
                 Members.Remove(member);
-                // 同步删除本地记录
-                var store = LocalMemberStore.Load();
-                store.Remove(member.Id);
+                LocalMemberStore.Remove(member.GroupId, member.Id);
                 StatusText = $"已删除 {member.Name}";
             }
             else
@@ -243,9 +255,8 @@ public partial class MainViewModel : ViewModelBase
                 // 记录历史组名
                 AddHistoryGroup(SelectedGroupId);
 
-                // 保存本地注册记录
-                var store = LocalMemberStore.Load();
-                store.Add(new LocalMemberRecord
+                // 同一成员重复注册时更新本地元数据，不产生重复记录。
+                LocalMemberStore.Upsert(new LocalMemberRecord
                 {
                     MemberId = result.MemberId,
                     Name = result.Name,

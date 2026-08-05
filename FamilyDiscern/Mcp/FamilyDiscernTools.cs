@@ -51,9 +51,8 @@ public class FamilyDiscernTools
             settings.AddGroup(groupId);
             settings.Save();
 
-            // 保存本地注册记录
-            var store = LocalMemberStore.Load();
-            store.Add(new LocalMemberRecord
+            // 新增或更新本地注册记录，避免重复成员。
+            LocalMemberStore.Upsert(new LocalMemberRecord
             {
                 MemberId = result.MemberId,
                 Name = result.Name,
@@ -112,9 +111,9 @@ public class FamilyDiscernTools
     }
 
     /// <summary>
-    /// 列出组内所有成员
+    /// 列出组内所有成员，并将远端注册列表同步到 members.json
     /// </summary>
-    [McpServerTool, Description("列出指定组的所有家庭成员。groupId 可选，默认使用配置第一个组")]
+    [McpServerTool, Description("列出指定组的所有家庭成员并同步本地记录。groupId 可选，默认使用配置第一个组")]
     public static async Task<string> ListMembers(string? groupId = null)
     {
         var settings = GetSettings();
@@ -122,6 +121,9 @@ public class FamilyDiscernTools
 
         using var client = new ReidClient(settings.ServerUrl);
         var members = await client.ListMembersAsync(groupId);
+
+        // 即使远端返回空列表也要同步，以删除该组的陈旧本地记录。
+        LocalMemberStore.SynchronizeGroup(groupId, members);
 
         if (members.Count == 0)
             return $"组 {groupId} 中没有成员";
@@ -141,6 +143,12 @@ public class FamilyDiscernTools
 
         using var client = new ReidClient(settings.ServerUrl);
         var ok = await client.DeleteMemberAsync(groupId, memberId);
-        return ok ? $"已删除成员 {memberId} (组: {groupId})" : $"删除失败: 未找到成员 {memberId} (组: {groupId})";
+        if (ok)
+        {
+            LocalMemberStore.Remove(groupId, memberId);
+            return $"已删除成员 {memberId} (组: {groupId})";
+        }
+
+        return $"删除失败: 未找到成员 {memberId} (组: {groupId})";
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
@@ -36,6 +37,7 @@ public class FamilyMember
     public string Id { get; set; } = "";
     public string GroupId { get; set; } = "";
     public string Name { get; set; } = "";
+    public DateTime EnrolledAt { get; set; }
     public string Mp4Path { get; set; } = "";
     public double FrameIntervalSeconds { get; set; }
     public string RegisterTime { get; set; } = "";
