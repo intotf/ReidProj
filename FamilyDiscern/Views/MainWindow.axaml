@@ -1,0 +1,139 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:FamilyDiscern.ViewModels"
+        x:Class="FamilyDiscern.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="FamilyDiscern - 家庭成员识别管理"
+        Width="1000" Height="680"
+        WindowStartupLocation="CenterScreen">
+
+    <DockPanel>
+        <!-- 底部状态栏 -->
+        <Border DockPanel.Dock="Bottom" Padding="8,4" Background="#e8e8e8">
+            <TextBlock Text="{Binding StatusText}" />
+        </Border>
+
+        <TabControl Margin="8" FontSize="12">
+
+            <!-- ═══ 成员管理 ═══ -->
+            <TabItem Header="👥 成员管理" FontSize="14">
+                <StackPanel Margin="16" Spacing="12">
+
+                    <!-- 刷新 -->
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="🔄 刷新所有组成员" Command="{Binding RefreshMembersCommand}" IsEnabled="{Binding !IsBusy}" />
+                    </StackPanel>
+
+                    <!-- 成员列表 -->
+                    <DataGrid ItemsSource="{Binding Members}" AutoGenerateColumns="False"
+                              Height="280" IsReadOnly="True" CanUserResizeColumns="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="组名" Binding="{Binding GroupId}" Width="100" />
+                            <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="100" />
+                            <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="180" />
+                            <DataGridTextColumn Header="视频路径" Binding="{Binding Mp4Path}" Width="200" />
+                            <DataGridTextColumn Header="帧间隔" Binding="{Binding FrameIntervalSeconds}" Width="70" />
+                            <DataGridTextColumn Header="注册时间" Binding="{Binding RegisterTime}" Width="140" />
+                            <DataGridTemplateColumn Header="操作" Width="60">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="🗑"
+                                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).DeleteMemberCommand}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip.Tip="删除成员" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <Separator />
+
+                    <!-- 注册新成员 -->
+                    <TextBlock Text="注册新成员" FontWeight="Bold" FontSize="13" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="注册到组:" VerticalAlignment="Center" />
+                        <ComboBox ItemsSource="{Binding HistoryGroups}"
+                                  SelectedItem="{Binding SelectedGroupId}"
+                                  Width="150" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="成员名称:" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding EnrollMemberName}" Width="200" />
+                        <TextBlock Text="帧间隔(秒):" VerticalAlignment="Center" />
+                        <NumericUpDown Value="{Binding FrameIntervalSeconds}" Minimum="0.1" Maximum="10" Increment="0.1" FormatString="F1" Width="120" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="视频文件:" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding EnrollMp4Path}" Width="300" IsReadOnly="True" />
+                        <Button Content="📂" Click="OnSelectEnrollMp4" ToolTip.Tip="选择视频" />
+                    </StackPanel>
+                    <Button Content="🚀 注册" Command="{Binding EnrollCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Left" />
+
+                </StackPanel>
+            </TabItem>
+
+            <!-- ═══ 视频识别 ═══ -->
+            <TabItem Header="🔍 视频识别" FontSize="14">
+                <StackPanel Margin="16" Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="对比组:" VerticalAlignment="Center" />
+                        <ComboBox ItemsSource="{Binding HistoryGroups}"
+                                  SelectedItem="{Binding SelectedGroupId}"
+                                  Width="150" />
+                    </StackPanel>
+
+                    <!-- 权重参数 -->
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="全身:" VerticalAlignment="Center" />
+                        <NumericUpDown Value="{Binding WCloth}" Minimum="0" Maximum="1" Increment="0.05" FormatString="F2" Width="140" />
+                        <TextBlock Text="头肩:" VerticalAlignment="Center" />
+                        <NumericUpDown Value="{Binding WHead}" Minimum="0" Maximum="1" Increment="0.05" FormatString="F2" Width="140" />
+                        <TextBlock Text="体型:" VerticalAlignment="Center" />
+                        <NumericUpDown Value="{Binding WBody}" Minimum="0" Maximum="1" Increment="0.05" FormatString="F2" Width="140" />
+                        <TextBlock Text="步态:" VerticalAlignment="Center" />
+                        <NumericUpDown Value="{Binding WGait}" Minimum="0" Maximum="1" Increment="0.05" FormatString="F2" Width="140" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="视频文件:" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding RecognizeMp4Path}" Width="450" IsReadOnly="True" />
+                        <Button Content="📂 选择" Click="OnSelectRecognizeMp4" />
+                        <Button Content="🔍 开始识别" Command="{Binding RecognizeCommand}" IsEnabled="{Binding !IsBusy}" />
+                        <TextBlock Text="{Binding VideoCodecInfo}" VerticalAlignment="Center" Foreground="DarkCyan" FontWeight="Bold"
+                                   IsVisible="{Binding VideoCodecInfo, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    </StackPanel>
+
+                    <!-- 识别结果 -->
+                    <Border Background="#f9f9f9" Padding="12" CornerRadius="4" BorderBrush="#ddd" BorderThickness="1"
+                            IsVisible="{Binding RecognizeResult, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="识别结果:" FontWeight="Bold" />
+                            <SelectableTextBlock Text="{Binding RecognizeResult}" FontFamily="Consolas" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </TabItem>
+
+            <!-- ═══ 配置 ═══ -->
+            <TabItem Header="⚙ 配置" FontSize="14">
+                <StackPanel Margin="16" Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="服务地址:" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding ServerUrl}" Width="300" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="FFmpeg 路径:" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding FfmpegPath}" Width="400" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="帧间隔(秒):" VerticalAlignment="Center" />
+                        <NumericUpDown Value="{Binding FrameIntervalSeconds}" Minimum="0.1" Maximum="10" Increment="0.1" FormatString="F1" Width="120" />
+                    </StackPanel>
+                    <Button Content="💾 保存配置" Command="{Binding SaveConfigCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
+                </StackPanel>
+            </TabItem>
+
+        </TabControl>
+    </DockPanel>
+</Window>
