@@ -16,51 +16,47 @@ internal static class HungarianSolver
         int m = cost.GetLength(1);
         int size = Math.Max(n, m);
 
-        // 扩展为方阵。
-        // 算法内部行列统一使用 1..size，索引 0 保留给哨兵（p[0] / way 回链）。
-        // 若直接采用 0 基，真实行列 0 会与哨兵值 0 冲突：第一个检测列永远无法匹配，
-        // 且虚拟行可能抢占真实行 0 的匹配，因此这里把真实行列整体右移 1 位。
-        var a = new float[size + 1, size + 1];
+        // 扩展为方阵
+        var a = new float[size, size];
         float maxCost = float.MinValue;
         for (int i = 0; i < n; i++)
         {
             for (int j = 0; j < m; j++)
             {
-                a[i + 1, j + 1] = cost[i, j];
+                a[i, j] = cost[i, j];
                 if (cost[i, j] > maxCost)
                 {
                     maxCost = cost[i, j];
                 }
             }
         }
-
         // 填充扩展行/列为大值（最小化问题中避免匹配到虚拟行列）
         float big = maxCost + 1;
-        for (int i = 1; i <= size; i++)
+        for (int i = 0; i < size; i++)
         {
-            for (int j = 1; j <= size; j++)
+            for (int j = 0; j < size; j++)
             {
-                if (i > n || j > m)
+                if (i >= n || j >= m)
                 {
                     a[i, j] = big;
                 }
             }
         }
 
-        // 标准 Hungarian 算法 (Munkres)，1 基行列
-        var u = new float[size + 1];
-        var v = new float[size + 1];
-        var p = new int[size + 1];
-        var way = new int[size + 1];
+        // 标准 Hungarian 算法 (Munkres)
+        var u = new float[size];
+        var v = new float[size];
+        var p = new int[size];
+        var way = new int[size];
 
-        for (int i = 1; i <= size; i++)
+        for (int i = 0; i < size; i++)
         {
             p[0] = i;
             int j0 = 0;
-            var minv = new float[size + 1];
-            var used = new bool[size + 1];
+            var minv = new float[size];
+            var used = new bool[size];
 
-            for (int j = 0; j <= size; j++)
+            for (int j = 0; j < size; j++)
             {
                 minv[j] = float.MaxValue;
                 used[j] = false;
@@ -73,7 +69,7 @@ internal static class HungarianSolver
                 float delta = float.MaxValue;
                 int j1 = 0;
 
-                for (int j = 1; j <= size; j++)
+                for (int j = 1; j < size; j++)
                 {
                     if (!used[j])
                     {
@@ -91,7 +87,7 @@ internal static class HungarianSolver
                     }
                 }
 
-                for (int j = 0; j <= size; j++)
+                for (int j = 0; j < size; j++)
                 {
                     if (used[j])
                     {
@@ -119,11 +115,11 @@ internal static class HungarianSolver
         // 提取结果
         var result = new int[n];
         Array.Fill(result, -1);
-        for (int j = 1; j <= size; j++)
+        for (int j = 1; j < size; j++)
         {
-            if (p[j] >= 1 && p[j] <= n && j <= m)
+            if (p[j] < n && j < m)
             {
-                result[p[j] - 1] = j - 1;
+                result[p[j]] = j;
             }
         }
 

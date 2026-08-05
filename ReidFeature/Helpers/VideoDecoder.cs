@@ -13,7 +13,7 @@ namespace ReidFeature.Helpers;
 ///
 /// 流程：先嗅探裸流 NAL 头识别编码（H264/H265），再按该编码启动 ffmpeg 解码，
 /// 输出 rawvideo(RGB24)（无封装头，RGB 字节序与 ImageSharp Rgb24 一致）；
-/// 默认启用硬件解码（hwaccel auto，无可用硬件时自动回退软解）。
+/// 默认使用软件解码（不启用 hwaccel，确保选帧稳定、与旧版一致）。
 /// </summary>
 internal static partial class VideoDecoder
 {
@@ -301,10 +301,6 @@ internal static partial class VideoDecoder
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-
-        // 硬件解码加速，无可用硬件时 ffmpeg 自动回退软解
-        startInfo.ArgumentList.Add("-hwaccel");
-        startInfo.ArgumentList.Add("auto");
 
         // 输入：裸流，按嗅探出的编码解析
         startInfo.ArgumentList.Add("-f");
