@@ -116,6 +116,18 @@ foreach (var deviceId in deviceIds)
     var deviceDir = Path.Combine(outputDir, deviceId);
     Directory.CreateDirectory(deviceDir);
 
+    // 加载已下载记录
+    var downloadedListPath = Path.Combine(deviceDir, ".downloaded.txt");
+    var downloadedSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    if (File.Exists(downloadedListPath))
+    {
+        foreach (var line in File.ReadAllLines(downloadedListPath))
+        {
+            if (!string.IsNullOrWhiteSpace(line))
+                downloadedSet.Add(line.Trim());
+        }
+    }
+
     // [1/3] 获取媒体列表
     Console.WriteLine("  [1/3] 获取媒体列表...");
     var items = await FetchMediaListAsync(httpClient, deviceId, pageSize, maxFiles, minCreationTime);
@@ -129,11 +141,20 @@ foreach (var deviceId in deviceIds)
     // [2/3] 下载文件
     Console.WriteLine("  [2/3] 下载文件...");
     int deviceDownloaded = 0;
+    int deviceSkipped = 0;
     foreach (var item in items)
     {
         var fileName = Path.GetFileName(item.FileKey);
         if (string.IsNullOrEmpty(fileName))
             fileName = $"{item.Id}.mp4";
+
+        // 通过已下载记录判断是否需要下载
+        if (downloadedSet.Contains(fileName))
+        {
+            deviceSkipped++;
+            Console.WriteLine($"    {fileName} (已下载，跳过)");
+            continue;
+        }
 
         var localPath = Path.Combine(deviceDir, fileName);
         Console.Write($"    {fileName} ({FormatSize(item.FileSize)})...");
@@ -151,6 +172,7 @@ foreach (var deviceId in deviceIds)
             await response.ResponseStream.CopyToAsync(fileStream);
 
             deviceDownloaded++;
+            downloadedSet.Add(fileName);
             Console.WriteLine(" ✓");
         }
         catch (Exception ex)
@@ -159,8 +181,22 @@ foreach (var deviceId in deviceIds)
         }
     }
 
-    Console.WriteLine($"  设备 {deviceId}: 成功下载 {deviceDownloaded}/{items.Count} 个");
+    // 保存已下载记录
+    File.WriteAllLines(downloadedListPath, downloadedSet);
+
+    if (deviceSkipped > 0)
+        Console.WriteLine($"  设备 {deviceId}: 跳过 {deviceSkipped} 个已下载文件");
+    Console.WriteLine($"  设备 {deviceId}: 成功下载 {deviceDownloaded}/{items.Count - deviceSkipped} 个");
     totalDownloaded += deviceDownloaded;
+
+    // 有新下载时，将第一条的 CreationTime + 1秒 更新到配置文件的 MinCreationTime
+    if (deviceDownloaded > 0 && items.Count > 0)
+    {
+        var latestTime = items[0].CreationTime.AddSeconds(1);
+        var latestTimeStr = latestTime.ToString("o");
+        UpdateMinCreationTimeInConfig(envName, latestTimeStr);
+        Console.WriteLine($"  已更新 MinCreationTime -> {latestTimeStr}");
+    }
 }
 
 // ── [3/3] 汇总 ────────────────────────────────────
@@ -170,6 +206,10 @@ Console.WriteLine(new string('─', 50));
 Console.WriteLine($"总下载数: {totalDownloaded}");
 Console.WriteLine($"保存目录: {Path.GetFullPath(outputDir)}");
 Console.WriteLine(new string('─', 50));
+
+Console.WriteLine();
+Console.WriteLine("按任意键退出...");
+Console.ReadKey();
 
 return totalDownloaded > 0 ? 0 : 1;
 
@@ -300,6 +340,74 @@ static void MergeConfig(AppConfig baseConfig, AppConfig envConfig)
     if (!string.IsNullOrEmpty(envConfig.Aws.SecretKey)) baseConfig.Aws.SecretKey = envConfig.Aws.SecretKey;
     if (!string.IsNullOrEmpty(envConfig.Aws.Region)) baseConfig.Aws.Region = envConfig.Aws.Region;
     if (!string.IsNullOrEmpty(envConfig.Aws.BucketName)) baseConfig.Aws.BucketName = envConfig.Aws.BucketName;
+}
+
+/// <summary>
+/// 更新配置文件中的 MinCreationTime
+/// </summary>
+static void UpdateMinCreationTimeInConfig(string envName, string newMinCreationTime)
+{
+    var baseDir = AppContext.BaseDirectory;
+
+    // 确定要更新的配置文件路径（优先更新环境配置，没有则更新基础配置）
+    string configPath;
+    if (!string.IsNullOrEmpty(envName))
+    {
+        configPath = Path.Combine(baseDir, $"appsettings.{envName}.json");
+        if (!File.Exists(configPath))
+            configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"appsettings.{envName}.json");
+    }
+    else
+    {
+        configPath = Path.Combine(baseDir, "appsettings.json");
+        if (!File.Exists(configPath))
+            configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
+    }
+
+    if (!File.Exists(configPath))
+        return;
+
+    try
+    {
+        var json = File.ReadAllText(configPath);
+        using var doc = JsonDocument.Parse(json);
+        using var ms = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
+        {
+            writer.WriteStartObject();
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (prop.Name == "AppConfig" && prop.Value.ValueKind == JsonValueKind.Object)
+                {
+                    writer.WritePropertyName("AppConfig");
+                    writer.WriteStartObject();
+                    foreach (var inner in prop.Value.EnumerateObject())
+                    {
+                        if (inner.Name == "MinCreationTime")
+                        {
+                            writer.WriteString("MinCreationTime", newMinCreationTime);
+                        }
+                        else
+                        {
+                            inner.WriteTo(writer);
+                        }
+                    }
+                    writer.WriteEndObject();
+                }
+                else
+                {
+                    prop.WriteTo(writer);
+                }
+            }
+            writer.WriteEndObject();
+        }
+
+        File.WriteAllText(configPath, Encoding.UTF8.GetString(ms.ToArray()));
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"    更新配置文件失败: {ex.Message}");
+    }
 }
 
 /// <summary>

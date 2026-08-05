@@ -54,4 +54,7 @@ public class MediaItem
 
     [JsonPropertyName("deviceNum")]
     public string DeviceNum { get; set; } = "";
+
+    [JsonPropertyName("creationTime")]
+    public DateTimeOffset CreationTime { get; set; }
 }
