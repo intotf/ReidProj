@@ -1,7 +1,6 @@
 using FaceFeature.Helpers;
 using FaceFeature.Payloads;
 using FaceFeature.Services;
-using Microsoft.Extensions.Options;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
@@ -18,7 +17,6 @@ public static class DetectHandler
     /// <param name="context">HTTP 上下文</param>
     /// <param name="detectService">检测编排服务</param>
     /// <param name="logger">日志记录器</param>
-    /// <param name="faceOptions">人脸流水线配置（融合参数）</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）；≤0 时解码输入流的所有帧</param>
     /// <param name="fusionFrames">融合帧数上限（&gt;0）</param>
     /// <param name="cancellationToken">取消令牌</param>
@@ -26,18 +24,12 @@ public static class DetectHandler
         HttpContext context,
         DetectService detectService,
         ILogger<Program> logger,
-        IOptions<FaceFeatureOptions> faceOptions,
         double frameIntervalSeconds = 0.5,
         int fusionFrames = 30,
         CancellationToken cancellationToken = default)
     {
         var frames = detectService.DetectFramesAsync(context.Request.Body, frameIntervalSeconds, cancellationToken);
-        var fused = await FaceVideoFusion.FuseAsync(
-            frames,
-            fusionFrames > 0 ? fusionFrames : int.MaxValue,
-            faceOptions.Value.Fusion,
-            logger,
-            cancellationToken);
+        var fused = await FaceVideoFusion.FuseAsync(frames, fusionFrames > 0 ? fusionFrames : int.MaxValue, cancellationToken);
         if (fused is null)
         {
             return null;

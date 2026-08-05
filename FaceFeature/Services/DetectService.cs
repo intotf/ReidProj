@@ -15,7 +15,7 @@ public sealed class DetectService
 {
     private readonly FaceDetector _faceDetector;
     private readonly FaceExtractor _faceExtractor;
-    private readonly FaceFeatureOptions _options;
+    private readonly FaceQualityOptions _qualityOptions;
     private readonly ILogger<DetectService> _logger;
 
     /// <summary>
@@ -23,25 +23,24 @@ public sealed class DetectService
     /// </summary>
     /// <param name="faceDetector">人脸检测器</param>
     /// <param name="faceExtractor">人脸特征提取器</param>
-    /// <param name="options">人脸流水线配置（清晰度筛选等）</param>
+    /// <param name="qualityOptions">清晰度筛选配置</param>
     /// <param name="logger">日志记录器</param>
     public DetectService(
         FaceDetector faceDetector,
         FaceExtractor faceExtractor,
-        IOptions<FaceFeatureOptions> options,
+        IOptions<FaceQualityOptions> qualityOptions,
         ILogger<DetectService> logger)
     {
         _faceDetector = faceDetector;
         _faceExtractor = faceExtractor;
-        _options = options.Value;
+        _qualityOptions = qualityOptions.Value;
         _logger = logger;
     }
 
 
 
     /// <summary>
-    /// 视频逐帧检测流：解码 H264/H265 裸流，逐帧检测并跳过模糊帧；
-    /// 本帧未检测到人脸时，下一帧直接跳过检测（节省推理开销）
+    /// 视频逐帧检测流：解码 H264/H265 裸流，逐帧检测并跳过模糊帧
     /// </summary>
     /// <remarks>返回的枚举器必须被完整消费或释放，否则池化缓冲与 ffmpeg 进程无法清理。</remarks>
     /// <param name="videoStream">H264/H265 裸流数据流</param>
@@ -52,28 +51,15 @@ public sealed class DetectService
         double frameIntervalSeconds,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        bool skipNext = false;
         await foreach (var image in VideoDecoder.DecodeFramesAsync(
             videoStream, _logger, frameIntervalSeconds, cancellationToken))
         {
             using (image)
             {
-                // 上一帧无人脸时，本帧跳过检测，仅消费解码帧以保持 ffmpeg 管道流通
-                if (skipNext)
-                {
-                    skipNext = false;
-                    continue;
-                }
-
                 var detection = DetectBestFace(image, skipBlurry: true);
                 if (detection is not null)
                 {
                     yield return detection;
-                }
-                else
-                {
-                    // 本帧无人脸（或模糊被跳过）→ 下一帧跳过检测
-                    skipNext = true;
                 }
             }
         }
@@ -95,9 +81,9 @@ public sealed class DetectService
 
         using var extraction = _faceExtractor.AlignAndScore(image, best);
 
-        if (skipBlurry && _options.FaceQuality.Enabled && extraction.Sharpness < _options.FaceQuality.SharpnessThreshold)
+        if (skipBlurry && _qualityOptions.Enabled && extraction.Sharpness < _qualityOptions.SharpnessThreshold)
         {
-            Log.FaceSkippedBlurry(_logger, extraction.Sharpness, _options.FaceQuality.SharpnessThreshold);
+            Log.FaceSkippedBlurry(_logger, extraction.Sharpness, _qualityOptions.SharpnessThreshold);
             return null;
         }
 

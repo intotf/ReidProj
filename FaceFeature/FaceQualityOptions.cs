@@ -1,7 +1,7 @@
 namespace FaceFeature;
 
 /// <summary>
-/// 人脸清晰度筛选配置，绑定 appsettings.json 的 FaceFeature:FaceQuality 节
+/// 人脸清晰度筛选配置，绑定 appsettings.json 的 FaceQuality 节
 /// </summary>
 public sealed class FaceQualityOptions
 {

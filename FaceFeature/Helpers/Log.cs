@@ -58,7 +58,4 @@ static partial class Log
 
     [LoggerMessage(Level = LogLevel.Information, Message = "多帧融合完成: 使用 {Frames} 帧, 提前完成={Early}, 相似度={Score:F4}")]
     public static partial void FaceFusionCompleted(ILogger logger, int frames, bool early, float score);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "跳过离群帧: 余弦={Cosine:F3} < 门控={Gate:F3}")]
-    public static partial void FaceFusionSkippedOutlier(ILogger logger, float cosine, float gate);
 }

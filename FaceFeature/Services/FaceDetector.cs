@@ -36,6 +36,9 @@ public sealed class FaceDetector : IDisposable
     /// <summary>人脸置信度过滤阈值</summary>
     private const float ConfidenceThreshold = 0.6f;
 
+    /// <summary>人脸最小尺寸（像素），低于此值的人脸特征不可靠，将被忽略</summary>
+    private const int MinFaceSize = 50;
+
     // ─── 预处理常量（SCRFD 归一化）───────────────────────────
 
     /// <summary>SCRFD 预处理的像素均值</summary>
@@ -55,9 +58,6 @@ public sealed class FaceDetector : IDisposable
 
     private readonly ILogger<FaceDetector> _logger;
 
-    /// <summary>人脸流水线配置（人脸最小尺寸等）</summary>
-    private readonly FaceFeatureOptions _options;
-
     /// <summary>ONNX Runtime 推理会话</summary>
     private readonly InferenceSession _session;
 
@@ -66,15 +66,10 @@ public sealed class FaceDetector : IDisposable
     /// </summary>
     /// <param name="logger">日志记录器</param>
     /// <param name="onnxOptions">ONNX Runtime 会话配置</param>
-    /// <param name="featureOptions">人脸流水线配置</param>
     /// <exception cref="FileNotFoundException">models/det_10g.onnx 未找到时抛出</exception>
-    public FaceDetector(
-        ILogger<FaceDetector> logger,
-        IOptions<OnnxSessionOptions> onnxOptions,
-        IOptions<FaceFeatureOptions> featureOptions)
+    public FaceDetector(ILogger<FaceDetector> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
-        _options = featureOptions.Value;
         _session = new InferenceSession(FindModelPath(), onnxOptions.Value.Face);
 
         // det_10g（buffalo_l）固定布局：9 个输出（3 层 score / bbox / 5 关键点），channels-last。
@@ -143,7 +138,7 @@ public sealed class FaceDetector : IDisposable
                 DecodeLevel(
                     scores, bboxes, kpss,
                     stride, NumAnchors, fmSize,
-                    scale, padX, padY, Math.Max(1, _options.MinFaceSize), image.Width, image.Height,
+                    scale, padX, padY, image.Width, image.Height,
                     ref best);
             }
 
@@ -267,14 +262,13 @@ public sealed class FaceDetector : IDisposable
     /// <param name="scale">letterbox 缩放比例</param>
     /// <param name="padX">letterbox 水平填充量</param>
     /// <param name="padY">letterbox 垂直填充量</param>
-    /// <param name="minFaceSize">人脸最小尺寸（像素），低于该值的候选框丢弃</param>
     /// <param name="imgW">原图宽度</param>
     /// <param name="imgH">原图高度</param>
     /// <param name="best">当前置信度最高的候选框（尚未找到时为 null）</param>
     private static void DecodeLevel(
         ReadOnlySpan<float> scores, ReadOnlySpan<float> bboxes, ReadOnlySpan<float> kpss,
         int stride, int numAnchors, int fmSize,
-        float scale, float padX, float padY, int minFaceSize,
+        float scale, float padX, float padY,
         int imgW, int imgH,
         ref Candidate? best)
     {
@@ -314,7 +308,7 @@ public sealed class FaceDetector : IDisposable
 
             float w = x2 - x1;
             float h = y2 - y1;
-            if (w < minFaceSize || h < minFaceSize)
+            if (w < MinFaceSize || h < MinFaceSize)
             {
                 continue;
             }

@@ -1,7 +1,6 @@
 using FaceFeature.Helpers;
 using FaceFeature.Payloads;
 using FaceFeature.Services;
-using Microsoft.Extensions.Options;
 
 namespace FaceFeature.Handlers
 {
@@ -21,7 +20,6 @@ namespace FaceFeature.Handlers
         /// <param name="context">HTTP 上下文</param>
         /// <param name="detectService">检测编排服务</param>
         /// <param name="logger">日志记录器</param>
-        /// <param name="faceOptions">人脸流水线配置（融合参数）</param>
         /// <param name="groupId">分组 ID</param>
         /// <param name="frameIntervalSeconds">帧间隔秒数</param>
         /// <param name="similarityThreshold">相似度阈值</param>
@@ -32,7 +30,6 @@ namespace FaceFeature.Handlers
             HttpContext context,
             DetectService detectService,
             ILogger<Program> logger,
-            IOptions<FaceFeatureOptions> faceOptions,
             string groupId,
             double frameIntervalSeconds = 0.5,
             float similarityThreshold = SimilarityThreshold,
@@ -40,7 +37,7 @@ namespace FaceFeature.Handlers
             CancellationToken cancellationToken = default)
         {
             return await RecognizeAsync(
-                faceGroupService, context.Request, detectService, logger, faceOptions, groupId,
+                faceGroupService, context.Request, detectService, logger, groupId,
                 frameIntervalSeconds, similarityThreshold, fusionFrames, cancellationToken);
         }
 
@@ -49,7 +46,6 @@ namespace FaceFeature.Handlers
             HttpRequest request,
             DetectService detectService,
             ILogger<Program> logger,
-            IOptions<FaceFeatureOptions> faceOptions,
             string groupId,
             double frameIntervalSeconds,
             float similarityThreshold,
@@ -60,11 +56,7 @@ namespace FaceFeature.Handlers
             var frames = detectService.DetectFramesAsync(request.Body, frameIntervalSeconds, cancellationToken);
 
             var fused = await FaceVideoFusion.FuseAsync(
-                frames,
-                fusionFrames > 0 ? fusionFrames : int.MaxValue,
-                faceOptions.Value.Fusion,
-                logger,
-                cancellationToken);
+                frames, fusionFrames > 0 ? fusionFrames : int.MaxValue, cancellationToken);
             if (fused is null)
             {
                 return null;

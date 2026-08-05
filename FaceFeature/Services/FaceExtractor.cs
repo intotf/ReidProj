@@ -44,18 +44,14 @@ public sealed class FaceExtractor : IDisposable
     /// </summary>
     /// <param name="logger">日志记录器</param>
     /// <param name="onnxOptions">ONNX Runtime 会话配置</param>
-    /// <param name="featureOptions">人脸流水线配置（特征模型文件名）</param>
     /// <exception cref="FileNotFoundException">models 下配置的特征模型未找到时抛出</exception>
-    public FaceExtractor(
-        ILogger<FaceExtractor> logger,
-        IOptions<OnnxSessionOptions> onnxOptions,
-        IOptions<FaceFeatureOptions> featureOptions)
+    public FaceExtractor(ILogger<FaceExtractor> logger, IOptions<OnnxSessionOptions> onnxOptions)
     {
         _logger = logger;
 
-        var modelName = string.IsNullOrWhiteSpace(featureOptions.Value.FaceRecognitionModelName)
+        var modelName = string.IsNullOrWhiteSpace(onnxOptions.Value.FaceRecognitionModelName)
             ? "glintr100.onnx"
-            : featureOptions.Value.FaceRecognitionModelName;
+            : onnxOptions.Value.FaceRecognitionModelName;
         var modelPath = Path.Combine(AppContext.BaseDirectory, "models", modelName);
         if (!File.Exists(modelPath))
         {

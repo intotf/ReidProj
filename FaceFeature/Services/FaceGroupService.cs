@@ -18,7 +18,7 @@ public sealed class FaceGroupService
     private const string ImagesDirName = "images";
 
     private readonly DetectService _detectService;
-    private readonly FaceFeatureOptions _options;
+    private readonly FaceQualityOptions _qualityOptions;
     private readonly ILogger<FaceGroupService> _logger;
     private readonly object _lock = new();
     private readonly Dictionary<string, List<RegisteredFace>> _groups = new(StringComparer.OrdinalIgnoreCase);
@@ -29,11 +29,11 @@ public sealed class FaceGroupService
     /// </summary>
     public FaceGroupService(
         DetectService detectService,
-        IOptions<FaceFeatureOptions> options,
+        IOptions<FaceQualityOptions> qualityOptions,
         ILogger<FaceGroupService> logger)
     {
         _detectService = detectService;
-        _options = options.Value;
+        _qualityOptions = qualityOptions.Value;
         _logger = logger;
         _root = Path.Combine(AppContext.BaseDirectory, "datas", "facegroups");
         LoadIndexes();
@@ -223,7 +223,7 @@ public sealed class FaceGroupService
             return FaceRegistrationResult.Failed("保存特征索引失败");
         }
 
-        if (_options.FaceQuality.Enabled && record.Sharpness < _options.FaceQuality.SharpnessThreshold)
+        if (_qualityOptions.Enabled && record.Sharpness < _qualityOptions.SharpnessThreshold)
         {
             Log.FaceGalleryLowQuality(_logger, $"{groupId}/{name}/{id}", record.Sharpness);
         }

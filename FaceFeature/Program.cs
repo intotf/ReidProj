@@ -21,8 +21,8 @@ namespace FaceFeature
                 builder.Configuration.GetSection("Onnx"));
 
             // ── 清晰度筛选配置 ────────────────────────────
-            builder.Services.Configure<FaceFeatureOptions>(
-                builder.Configuration.GetSection("FaceFeature"));
+            builder.Services.Configure<FaceQualityOptions>(
+                builder.Configuration.GetSection("FaceQuality"));
 
             // ── JSON 序列化 ──────────────────────────────
             builder.Services.ConfigureHttpJsonOptions(options =>
