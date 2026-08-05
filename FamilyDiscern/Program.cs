@@ -42,7 +42,7 @@ sealed class Program
 
             // MCP stdio 要求 stdout 仅用于 JSON-RPC；所有日志统一写入 stderr。
             builder.Logging.ClearProviders();
-            builder.Logging.AddSimpleConsole(options =>
+            builder.Logging.AddConsole(options =>
                 options.LogToStandardErrorThreshold = LogLevel.Trace);
 
             builder.Services

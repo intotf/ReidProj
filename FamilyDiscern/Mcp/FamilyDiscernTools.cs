@@ -90,7 +90,10 @@ public class FamilyDiscernTools
             return "错误: 启动 ffmpeg 失败";
 
         using var client = new ReidClient(settings.ServerUrl);
-        var result = await client.RecognizeAsync(ffmpegProcess.OutputStream, codec, groupId, settings.FrameIntervalSeconds);
+        var result = await client.RecognizeAsync(
+            ffmpegProcess.OutputStream, codec, groupId,
+            settings.FrameIntervalSeconds,
+            settings.WCloth, settings.WHead, settings.WBody, settings.WGait);
 
         if (result != null)
         {
