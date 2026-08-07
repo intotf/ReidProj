@@ -15,6 +15,36 @@ public class EnrollResult
 }
 
 /// <summary>
+/// 单个视频段的注册信息（批量注册结果中的明细项）
+/// </summary>
+public class EnrollSegmentInfo
+{
+    public string FileName { get; set; } = "";
+    public int TrackId { get; set; }
+}
+
+/// <summary>
+/// 批量注册（同一人多段注册）结果
+/// </summary>
+public class EnrollBatchResult
+{
+    public string MemberId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string GroupId { get; set; } = "";
+    public int SegmentCount { get; set; }
+    public List<EnrollSegmentInfo> Segments { get; set; } = [];
+}
+
+/// <summary>
+/// 成员合并（去重）请求
+/// </summary>
+public class MergeMembersRequest
+{
+    public string TargetMemberId { get; set; } = "";
+    public List<string> MergeMemberIds { get; set; } = [];
+}
+
+/// <summary>
 /// 识别结果
 /// </summary>
 public class PersonRecognition
@@ -46,5 +76,8 @@ public class FamilyMember
 [JsonSerializable(typeof(EnrollResult))]
 [JsonSerializable(typeof(PersonRecognition))]
 [JsonSerializable(typeof(List<FamilyMember>))]
-[JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]
+[JsonSerializable(typeof(EnrollBatchResult))]
+[JsonSerializable(typeof(EnrollSegmentInfo))]
+[JsonSerializable(typeof(MergeMembersRequest))]
+[JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 internal partial class ApiJsonContext : JsonSerializerContext;

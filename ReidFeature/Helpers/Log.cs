@@ -120,6 +120,23 @@ static partial class Log
     /// <param name="memberName">识别出的成员名称（stranger 时为 "stranger"）</param>
     /// <param name="score">四维融合相似度分数</param>
     /// <param name="trackId">Track ID</param>
-    [LoggerMessage(Level = LogLevel.Information, Message = "识别结果: {MemberName}, score={Score:F3}, track={TrackId}")]
-    public static partial void RecognitionResult(ILogger logger, string memberName, float score, int trackId);
+    /// <param name="secondScore">同 Track 内次佳成员的四维融合相似度分数（诊断用）</param>
+    [LoggerMessage(Level = LogLevel.Information, Message = "识别结果: {MemberName}, score={Score:F3}, second={SecondScore:F3}, track={TrackId}")]
+    public static partial void RecognitionResult(ILogger logger, string memberName, float score, int trackId, float secondScore);
+
+    /// <summary>记录批量注册（同一人多段注册）完成信息。</summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="memberName">成员名称</param>
+    /// <param name="segmentCount">成功融合的视频段数</param>
+    /// <param name="groupId">分组 ID</param>
+    [LoggerMessage(Level = LogLevel.Information, Message = "批量注册完成: 成员 {MemberName}, 融合段数 {SegmentCount}, group={GroupId}")]
+    public static partial void BatchEnrollCompleted(ILogger logger, string memberName, int segmentCount, string groupId);
+
+    /// <summary>记录成员合并（去重）完成信息。</summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="targetName">保留的成员名称</param>
+    /// <param name="mergedCount">合并删除的成员数</param>
+    /// <param name="groupId">分组 ID</param>
+    [LoggerMessage(Level = LogLevel.Information, Message = "成员合并完成: {TargetName}, 合并 {MergedCount} 条, group={GroupId}")]
+    public static partial void MembersMerged(ILogger logger, string targetName, int mergedCount, string groupId);
 }

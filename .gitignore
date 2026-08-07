@@ -380,3 +380,6 @@ FodyWeavers.xsd
 /ReidFeature/datas/persongroups/group2
 /MediaDownloader/appsettings.Development.json
 ReidFeature/datas/gallery/group1.json
+
+# 测试产物目录（任意层级）
+**/testrun/

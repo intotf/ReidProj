@@ -20,6 +20,7 @@ public static class EnrollmentHandler
     /// <param name="groupId">分组 ID</param>
     /// <param name="memberName">成员名称</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），如 0.5 表示每 0.5 秒一帧；≤0 时解码全部帧</param>
+    /// <param name="append">true 时始终新增一条成员记录（同一成员可注册多条视频）；false 时按名称合并更新（默认）</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>注册结果（成员 ID、名称、分组）；请求体为空、memberName 为空、未检测到人物或特征提取失败时返回 BadRequest</returns>
     public static async Task<IResult> HandleEnrollAsync(
@@ -30,6 +31,7 @@ public static class EnrollmentHandler
         string groupId,
         string memberName,
         double frameIntervalSeconds = 0.5,
+        bool append = false,
         CancellationToken cancellationToken = default)
     {
         var request = context.Request;
@@ -69,10 +71,128 @@ public static class EnrollmentHandler
 
         // 注册到 Gallery
         var memberId = await familyProvider.EnrollAsync(
-            groupId, memberName, bestTrack.FeaturePack, cancellationToken);
+            groupId, memberName, bestTrack.FeaturePack, append, cancellationToken);
 
         Log.MemberEnrolled(logger, memberName, memberId, groupId);
 
         return Results.Ok(new EnrollResult(memberId, memberName, groupId));
+    }
+
+    /// <summary>
+    /// 处理多段视频批量注册（同一人多段注册）
+    /// multipart 上传多段视频；append=false（默认）时各段取最长 Track 特征等权融合为一条成员，
+    /// append=true 时每段视频各自独立成一条成员记录（同一成员可注册多条视频，供多成员库 margin 判定）。
+    /// </summary>
+    /// <param name="familyProvider">家庭成员提供者（Gallery 数据源）</param>
+    /// <param name="context">HTTP 上下文</param>
+    /// <param name="detectService">检测编排服务</param>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="groupId">分组 ID</param>
+    /// <param name="memberName">成员名称（同名成员会合并更新）</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧），≤0 时解码全部帧</param>
+    /// <param name="append">true 时每段视频独立成一条成员记录；false 时多段等权融合为一条（默认）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>批量注册结果（含各段明细）；未上传视频、memberName 为空或全部段解码/检测失败时返回 BadRequest</returns>
+    public static async Task<IResult> HandleBatchEnrollAsync(
+        IFamilyMemberProvider familyProvider,
+        HttpContext context,
+        DetectService detectService,
+        ILogger<Program> logger,
+        string groupId,
+        string memberName,
+        double frameIntervalSeconds = 0.5,
+        bool append = false,
+        CancellationToken cancellationToken = default)
+    {
+        // 防御无效参数：NaN/±Infinity 统一按 0（解码全部帧）处理，并 clamp 到合理上限
+        if (double.IsNaN(frameIntervalSeconds) || double.IsInfinity(frameIntervalSeconds))
+        {
+            frameIntervalSeconds = 0;
+        }
+        frameIntervalSeconds = Math.Clamp(frameIntervalSeconds, 0, 3600);
+
+        if (string.IsNullOrWhiteSpace(memberName))
+        {
+            return Results.BadRequest("memberName 不能为空");
+        }
+
+        var form = await context.Request.ReadFormAsync(cancellationToken);
+        var files = form.Files;
+        if (files.Count == 0)
+        {
+            return Results.BadRequest("未上传任何视频");
+        }
+
+        var packs = new List<TrackFeaturePack>();
+        var segments = new List<EnrollSegmentInfo>();
+        string firstMemberId = "";
+        foreach (var file in files)
+        {
+            if (file.Length == 0)
+            {
+                continue;
+            }
+
+            await using var stream = file.OpenReadStream();
+            if (!await detectService.ProcessVideoStreamAsync(
+                stream, logger, frameIntervalSeconds, cancellationToken))
+            {
+                return Results.BadRequest($"视频解码失败: {file.FileName}");
+            }
+
+            var tracks = detectService.FlushCompletedTracks();
+            if (tracks.Count == 0)
+            {
+                segments.Add(new EnrollSegmentInfo(file.FileName, 0));
+                continue;
+            }
+
+            // FlushCompletedTracks 已按 Track Age 降序，首条即存活帧数最长的 Track
+            var best = tracks[0];
+            if (best.FeaturePack is null)
+            {
+                segments.Add(new EnrollSegmentInfo(file.FileName, best.TrackId));
+                continue;
+            }
+
+            segments.Add(new EnrollSegmentInfo(file.FileName, best.TrackId));
+            if (append)
+            {
+                // append=true：同一成员的多段视频各自独立成一条成员记录（多成员库 margin 判定用）
+                var id = await familyProvider.EnrollAsync(
+                    groupId, memberName, best.FeaturePack, append: true, cancellationToken);
+                if (firstMemberId.Length == 0)
+                {
+                    firstMemberId = id;
+                }
+            }
+            else
+            {
+                packs.Add(best.FeaturePack);
+            }
+        }
+
+        if (append)
+        {
+            if (firstMemberId.Length == 0)
+            {
+                return Results.BadRequest("所有视频均未检测到有效人物");
+            }
+            Log.BatchEnrollCompleted(logger, memberName, segments.Count(s => s.TrackId > 0), groupId);
+            return Results.Ok(new EnrollBatchResult(
+                firstMemberId, memberName, groupId, segments.Count(s => s.TrackId > 0), segments));
+        }
+
+        if (packs.Count == 0)
+        {
+            return Results.BadRequest("所有视频均未检测到有效人物");
+        }
+
+        // 多段特征等权融合后，作为一次注册写入（append=false 时同名成员会自动 EMA 合并更新）
+        var merged = FeaturePackMerger.WeightedAverage(packs, null);
+        var memberId = await familyProvider.EnrollAsync(groupId, memberName, merged, append: false, cancellationToken);
+
+        Log.BatchEnrollCompleted(logger, memberName, packs.Count, groupId);
+        return Results.Ok(new EnrollBatchResult(memberId, memberName, groupId, packs.Count, segments));
     }
 }

@@ -35,6 +35,29 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnSelectEnrollMp4s(object? sender, RoutedEventArgs e)
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "选择多段注册用视频（可多选）",
+            AllowMultiple = true,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("视频文件") { Patterns = ["*.mp4", "*.mkv", "*.avi", "*.mov"] }
+            ]
+        });
+
+        var paths = new System.Collections.Generic.List<string>();
+        foreach (var file in files)
+        {
+            var path = file.TryGetLocalPath();
+            if (path != null)
+                paths.Add(path);
+        }
+        if (paths.Count > 0)
+            ViewModel.EnrollMp4Paths = string.Join(";", paths);
+    }
+
     private async void OnSelectRecognizeMp4(object? sender, RoutedEventArgs e)
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions

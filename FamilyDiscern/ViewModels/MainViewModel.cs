@@ -25,6 +25,7 @@ public partial class MainViewModel : ViewModelBase
         WHead = settings.WHead;
         WBody = settings.WBody;
         WGait = settings.WGait;
+        HighConfidenceThreshold = settings.HighConfidenceThreshold;
         SelectedGroupId = settings.HistoryGroups.FirstOrDefault() ?? "";
         foreach (var g in settings.HistoryGroups)
             HistoryGroups.Add(g);
@@ -54,6 +55,9 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     public partial float WGait { get; set; }
 
+    [ObservableProperty]
+    public partial float HighConfidenceThreshold { get; set; }
+
     // === 组管理 ===
 
     [ObservableProperty]
@@ -68,6 +72,17 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     public partial string EnrollMp4Path { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string EnrollMp4Paths { get; set; } = "";
+
+    // === 合并去重 ===
+
+    [ObservableProperty]
+    public partial string MergeTargetMemberId { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string MergeMemberIds { get; set; } = "";
 
     // === 成员列表 ===
 
@@ -105,6 +120,7 @@ public partial class MainViewModel : ViewModelBase
         settings.WHead = WHead;
         settings.WBody = WBody;
         settings.WGait = WGait;
+        settings.HighConfidenceThreshold = HighConfidenceThreshold;
         settings.HistoryGroups = [.. HistoryGroups];
         settings.Save();
         _reidClient.UpdateBaseUrl(ServerUrl);
@@ -248,7 +264,7 @@ public partial class MainViewModel : ViewModelBase
                 return;
             }
 
-            var result = await _reidClient.EnrollAsync(ffmpegProcess.OutputStream, codec, SelectedGroupId, EnrollMemberName, (double)FrameIntervalSeconds);
+            var result = await _reidClient.EnrollAsync(ffmpegProcess.OutputStream, SelectedGroupId, EnrollMemberName, (double)FrameIntervalSeconds);
 
             if (result != null)
             {
@@ -277,6 +293,138 @@ public partial class MainViewModel : ViewModelBase
         catch (Exception ex)
         {
             StatusText = $"注册失败: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task EnrollMemberBatchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedGroupId))
+        {
+            StatusText = "请输入或选择组名";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(EnrollMemberName))
+        {
+            StatusText = "请输入成员名称";
+            return;
+        }
+
+        var paths = EnrollMp4Paths
+            .Split([';', '，', ',', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(p => File.Exists(p))
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            StatusText = "请选择至少 1 个有效的视频文件";
+            return;
+        }
+
+        IsBusy = true;
+        StatusText = $"正在为 {paths.Length} 段视频转裸流并批量注册...";
+        var tempFiles = new List<string>();
+        try
+        {
+            foreach (var path in paths)
+            {
+                var codec = await FfmpegService.DetectCodecAsync(FfmpegPath, path);
+                if (codec == VideoCodec.Unknown)
+                {
+                    StatusText = $"无法识别视频编码，仅支持 H264/H265: {path}";
+                    return;
+                }
+
+                var raw = await FfmpegService.ConvertToRawFileAsync(FfmpegPath, path, codec);
+                if (raw == null)
+                {
+                    StatusText = $"ffmpeg 转裸流失败: {path}";
+                    return;
+                }
+                tempFiles.Add(raw);
+            }
+
+            var result = await _reidClient.EnrollBatchAsync(
+                tempFiles, SelectedGroupId, EnrollMemberName, (double)FrameIntervalSeconds, append: true);
+            if (result == null)
+            {
+                StatusText = "批量注册失败: 服务返回空结果";
+                return;
+            }
+
+            AddHistoryGroup(SelectedGroupId);
+            LocalMemberStore.Upsert(new LocalMemberRecord
+            {
+                MemberId = result.MemberId,
+                Name = result.Name,
+                GroupId = result.GroupId,
+                Mp4Path = paths[0],
+                FrameIntervalSeconds = (double)FrameIntervalSeconds,
+                RegisterTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+            });
+
+            StatusText = $"✓ 批量注册成功! ID={result.MemberId}, Name={result.Name}, 融合段数={result.SegmentCount}";
+            await RefreshMembersAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"批量注册失败: {ex.Message}";
+        }
+        finally
+        {
+            foreach (var f in tempFiles)
+            {
+                try
+                {
+                    File.Delete(f);
+                }
+                catch
+                {
+                    // 忽略临时文件清理失败
+                }
+            }
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task MergeMembersAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedGroupId))
+        {
+            StatusText = "请输入或选择组名";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(MergeTargetMemberId))
+        {
+            StatusText = "请输入目标成员 ID";
+            return;
+        }
+
+        var ids = MergeMemberIds
+            .Split([';', '，', ',', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToArray();
+        if (ids.Length == 0)
+        {
+            StatusText = "请输入待合并成员 ID（多个用分号/逗号分隔）";
+            return;
+        }
+
+        IsBusy = true;
+        StatusText = "正在合并成员...";
+        try
+        {
+            var members = await _reidClient.MergeMembersAsync(SelectedGroupId, MergeTargetMemberId, ids);
+            LocalMemberStore.SynchronizeGroup(SelectedGroupId, members);
+            StatusText = $"✓ 合并完成，组 {SelectedGroupId} 现有 {members.Count} 个成员";
+            await RefreshMembersAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"合并失败: {ex.Message}";
         }
         finally
         {
@@ -322,7 +470,7 @@ public partial class MainViewModel : ViewModelBase
                 return;
             }
 
-            var result = await _reidClient.RecognizeAsync(ffmpegProcess.OutputStream, codec, SelectedGroupId, (double)FrameIntervalSeconds, WCloth, WHead, WBody, WGait);
+            var result = await _reidClient.RecognizeAsync(ffmpegProcess.OutputStream, SelectedGroupId, (double)FrameIntervalSeconds, WCloth, WHead, WBody, WGait, HighConfidenceThreshold);
 
             if (result != null)
             {

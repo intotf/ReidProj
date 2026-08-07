@@ -90,13 +90,13 @@ public sealed class DetectService : IDisposable
     /// <summary>
     /// 统一的视频流处理循环：解码 → 逐帧检测/跟踪/缓存
     /// </summary>
-    /// <param name="request">HTTP 请求（读取请求体视频流）</param>
+    /// <param name="videoStream">视频裸流（H264/H265 Annex-B）</param>
     /// <param name="logger">日志记录器</param>
     /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>处理成功返回 true；解码失败返回 false</returns>
     public async Task<bool> ProcessVideoStreamAsync(
-        HttpRequest request,
+        Stream videoStream,
         ILogger logger,
         double frameIntervalSeconds,
         CancellationToken cancellationToken)
@@ -104,7 +104,7 @@ public sealed class DetectService : IDisposable
         _frameIntervalSeconds = frameIntervalSeconds;
 
         var enumerable = VideoDecoder.DecodeFramesAsync(
-            request.Body, logger, frameIntervalSeconds, cancellationToken);
+            videoStream, logger, frameIntervalSeconds, cancellationToken);
         await using var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
 
         while (true)
@@ -136,6 +136,21 @@ public sealed class DetectService : IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// 处理 HTTP 视频流请求（读取请求体原始流）
+    /// </summary>
+    /// <param name="request">HTTP 请求（读取请求体视频流）</param>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="frameIntervalSeconds">帧间隔秒数（每隔 N 秒解码一帧）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>处理成功返回 true；解码失败返回 false</returns>
+    public Task<bool> ProcessVideoStreamAsync(
+        HttpRequest request,
+        ILogger logger,
+        double frameIntervalSeconds,
+        CancellationToken cancellationToken)
+        => ProcessVideoStreamAsync(request.Body, logger, frameIntervalSeconds, cancellationToken);
 
     /// <summary>
     /// 获取所有已完成 Track 的四维特征融合结果

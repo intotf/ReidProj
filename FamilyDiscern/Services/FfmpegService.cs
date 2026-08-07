@@ -112,4 +112,54 @@ public static class FfmpegService
         process.Start();
         return new FfmpegStreamProcess(process);
     }
+
+    /// <summary>
+    /// 将 MP4 转换为 Annex-B 裸流临时文件（用于批量注册等需要文件上传的场景）。
+    /// 返回临时文件路径，调用方负责在结束后删除；失败返回 null。
+    /// </summary>
+    /// <param name="ffmpegPath">ffmpeg 可执行文件路径</param>
+    /// <param name="mp4Path">MP4 文件路径</param>
+    /// <param name="codec">探测到的视频编码</param>
+    /// <param name="outputDir">临时文件目录（默认 %TEMP%\familydiscern）</param>
+    /// <param name="ct">取消令牌</param>
+    /// <returns>裸流临时文件路径；失败返回 null</returns>
+    public static async Task<string?> ConvertToRawFileAsync(
+        string ffmpegPath,
+        string mp4Path,
+        VideoCodec codec,
+        string? outputDir = null,
+        CancellationToken ct = default)
+    {
+        var dir = outputDir ?? Path.Combine(Path.GetTempPath(), "familydiscern");
+        Directory.CreateDirectory(dir);
+
+        var ext = codec == VideoCodec.H265 ? "hevc" : "h264";
+        var outputPath = Path.Combine(dir, $"{Path.GetFileNameWithoutExtension(mp4Path)}_{Guid.NewGuid():N}.{ext}");
+
+        using var process = StartRawStream(ffmpegPath, mp4Path, codec);
+        if (process == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            await using var file = File.Create(outputPath);
+            await process.OutputStream.CopyToAsync(file, ct);
+            await file.FlushAsync(ct);
+            return outputPath;
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(outputPath);
+            }
+            catch
+            {
+                // 忽略清理失败
+            }
+            return null;
+        }
+    }
 }

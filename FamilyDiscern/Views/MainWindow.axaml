@@ -70,6 +70,27 @@
                     </StackPanel>
                     <Button Content="🚀 注册" Command="{Binding EnrollCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Left" />
 
+                    <!-- 同一人多段注册 -->
+                    <Separator />
+                    <TextBlock Text="同一人多段注册（多段视频等权融合为一条成员）" FontWeight="Bold" FontSize="13" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="视频文件(多个):" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding EnrollMp4Paths}" Width="420" IsReadOnly="True" />
+                        <Button Content="📂 多选" Click="OnSelectEnrollMp4s" ToolTip.Tip="多选视频" />
+                    </StackPanel>
+                    <Button Content="🚀 多段注册" Command="{Binding EnrollMemberBatchCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Left" />
+
+                    <!-- 成员合并去重 -->
+                    <Separator />
+                    <TextBlock Text="成员合并去重（同一人多条记录合并为一条）" FontWeight="Bold" FontSize="13" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="目标成员ID:" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding MergeTargetMemberId}" Width="220" />
+                        <TextBlock Text="待合并ID(分号分隔):" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding MergeMemberIds}" Width="260" />
+                    </StackPanel>
+                    <Button Content="🔀 合并去重" Command="{Binding MergeMembersCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Left" />
+
                 </StackPanel>
             </TabItem>
 
@@ -93,6 +114,11 @@
                         <NumericUpDown Value="{Binding WBody}" Minimum="0" Maximum="1" Increment="0.05" FormatString="F2" Width="140" />
                         <TextBlock Text="步态:" VerticalAlignment="Center" />
                         <NumericUpDown Value="{Binding WGait}" Minimum="0" Maximum="1" Increment="0.05" FormatString="F2" Width="140" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="兜底阈值:" VerticalAlignment="Center" />
+                        <NumericUpDown Value="{Binding HighConfidenceThreshold}" Minimum="0" Maximum="1" Increment="0.005" FormatString="F3" Width="140" />
+                        <TextBlock Text="(歧义时高分仍命中，保存在配置)" VerticalAlignment="Center" Foreground="Gray" />
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Spacing="8">

@@ -163,17 +163,19 @@ Query 参数：
 **`POST /recognize/{groupId}`**
 
 在检测/跟踪/融合之上，将每个 Track 的特征包与 `{groupId}` 下的 Gallery 成员逐维匹配，
-返回**单个最佳匹配**。H264 / H265 裸流均可，编码由服务端自动识别。判定条件：
+返回**单个最佳匹配**。H264 / H265 裸流均可，编码由服务端自动识别。判定条件（多成员库混合逻辑）：
 
-- 最高分 > 0.62（`HitThreshold`）
-- 且与同 Track 次高分差 > 0.08（`MarginThreshold`）
+- 无歧义：最高分 > 0.88（`HitThreshold`）且与次高分差 > 0.08（`MarginThreshold`）→ 命中
+- 有歧义（margin 不满足）：最高分 ≥ 0.965（`HighConfidenceThreshold`）→ 仍命中（多为同一人多条目/相似成员）
+- 其余情况 → `stranger`
 
 Query 参数：
 
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `frameIntervalSeconds` | double | 0.5 | 帧间隔（秒） |
-| `wCloth` / `wHead` / `wBody` / `wGait` | float | 0.30 / 0.40 / 0.20 / 0.10 | 四维权重，可临时调整 |
+| `wCloth` / `wHead` / `wBody` / `wGait` | float | 0.30 / 0.40 / 0.20 / 0.10 | 四维权重；门铃场景实测建议 **0.50 / 0.50 / 0 / 0**（去掉体型/步态） |
+| `highConfidenceThreshold` | float | 0.965 | 高分兜底阈值（歧义时仍命中），取值 [0,1]，可动态调整 |
 
 响应：`PersonRecognition`（未命中时返回 `name = "stranger"`，`id` 为空串）
 
@@ -194,12 +196,49 @@ Query 参数：
 
 | 方法 | 路径 | 说明 | 响应 |
 |---|---|---|---|
-| POST | `/family/enroll/{groupId}/{memberName}` | 上传视频流注册成员（H264/H265 自动识别） | `EnrollResult` |
+| POST | `/family/enroll/{groupId}/{memberName}` | 上传视频流注册成员（H264/H265 自动识别）；`?append=true` 时始终新增一条记录 | `EnrollResult` |
+| POST | `/family/enroll-batch/{groupId}/{memberName}` | 同一人多段注册：multipart 一次上传多段视频；`append=false`（默认）各段等权融合为一条，`append=true` 时每段视频各自独立成一条成员记录（多成员库模式） | `EnrollBatchResult` |
+| POST | `/family/merge/{groupId}` | 成员合并去重：把同一人的多条成员特征等权融合为一条，删除被合并成员（JSON 请求体） | `MemberInfo[]` |
 | DELETE | `/family/{groupId}/{memberId}` | 删除成员 | `200` / `404` |
 | GET | `/family/{groupId}` | 列出成员摘要 | `MemberInfo[]` |
 
 `EnrollResult`：`{ "memberId": "...", "name": "...", "groupId": "..." }`
 `MemberInfo`：`{ "id": "...", "name": "...", "enrolledAt": "..." }`
+`EnrollBatchResult`：`{ "memberId": "...", "name": "...", "groupId": "...", "segmentCount": 2, "segments": [{ "fileName": "...", "trackId": 1 }] }`
+
+#### 多成员库注册流程（推荐）
+
+**多成员模式**：同一成员注册多段视频时用 `append=true`，每段视频独立成一条成员记录，
+配合识别的"高分兜底"逻辑（margin 歧义时 ≥0.965 仍命中），同一人多条目不会被误拒。
+
+```powershell
+# 方式一：一键脚本（自动 mp4→裸流；FamilyDiscern/脚本默认 append=true，每段独立成条）
+.\scripts\enroll_member_batch.ps1 -Folder D:\clips\laiguowei -GroupId group1 -MemberName 赖国伟 -Port 9000
+
+# 方式二：curl multipart（视频需先转成 Annex-B 裸流）
+curl.exe -X POST "http://localhost:9000/family/enroll-batch/group1/%E8%B5%96%E5%9B%BD%E4%BC%9F?frameIntervalSeconds=0.5&append=true" `
+  -F "videos=@seg1.h264" -F "videos=@seg2.h264" -F "videos=@seg3.h264"
+```
+
+如需把多条记录合并回一条，用下面的 `merge` 接口。
+
+成员合并去重（例如把"赖国伟-背面/赖国伟-正面"两条合并成一条）：
+
+```powershell
+# 先 GET /family/{groupId} 拿到成员 ID，再：
+.\scripts\merge_members.ps1 -GroupId group1 -TargetMemberId 9f51332364ad -MergeMemberIds 947b55f15b23 -Port 9000
+
+# 等价 curl：
+curl.exe -X POST "http://localhost:9000/family/merge/group1" `
+  -H "Content-Type: application/json" `
+  --data '{"targetMemberId":"9f51332364ad","mergeMemberIds":["947b55f15b23"]}'
+```
+
+> 注意：`enroll-batch` 会一次上传多段视频，服务端 `MaxRequestBodySize` 已放宽到 100MB；
+> 单视频注册仍建议用 `/family/enroll/...`（20MB 内的单个裸流）。
+
+> **注册源策略**：成员注册应使用固定的注册源视频（如 `G:\Tools\MediaDownloader\downloads\laiguowei\目标` 下的两个视频），
+> 不要用其他视频注册，以保证库项特征一致、识别结果稳定。
 
 ### 健康检查
 

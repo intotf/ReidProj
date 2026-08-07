@@ -58,12 +58,13 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<string> EnrollAsync(string groupId, string name, TrackFeaturePack featurePack, CancellationToken ct)
+    public async Task<string> EnrollAsync(string groupId, string name, TrackFeaturePack featurePack, bool append, CancellationToken ct)
     {
         string entryId;
         lock (_syncRoot)
         {
-            var entry = FindEntry(groupId, name);
+            // append=true：同一成员的多段视频各自独立成条目（供多成员库 margin 判定使用）
+            var entry = append ? null : FindEntry(groupId, name);
             if (entry is null)
             {
                 // 新注册：直接存储
@@ -111,6 +112,55 @@ public sealed class FamilyGalleryService : IFamilyMemberProvider, IDisposable
             }
             return Task.FromResult(false);
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<MemberInfo[]> MergeMembersAsync(
+        string groupId,
+        string targetMemberId,
+        IReadOnlyList<string> mergeMemberIds,
+        CancellationToken ct)
+    {
+        MemberInfo[] result = [];
+        string? targetName = null;
+        int mergedCount = 0;
+
+        lock (_syncRoot)
+        {
+            if (!_groups.TryGetValue(groupId, out var entries))
+            {
+                return Array.Empty<MemberInfo>();
+            }
+
+            var target = entries.FirstOrDefault(e => e.Id == targetMemberId);
+            if (target is null)
+            {
+                return entries.Select(e => new MemberInfo(e.Id, e.Name, e.EnrolledAt)).ToArray();
+            }
+
+            var sourceIds = mergeMemberIds.Where(id => id != targetMemberId).ToHashSet();
+            var sources = entries.Where(e => sourceIds.Contains(e.Id)).ToList();
+            if (sources.Count > 0)
+            {
+                var packs = new List<TrackFeaturePack>(sources.Count + 1) { target.FeaturePack };
+                packs.AddRange(sources.Select(s => s.FeaturePack));
+
+                target.FeaturePack = FeaturePackMerger.WeightedAverage(packs, null);
+                target.EnrolledAt = DateTime.UtcNow;
+                entries.RemoveAll(e => sourceIds.Contains(e.Id));
+                targetName = target.Name;
+                mergedCount = sources.Count;
+            }
+
+            result = entries.Select(e => new MemberInfo(e.Id, e.Name, e.EnrolledAt)).ToArray();
+        }
+
+        await SaveGalleryAsync(ct);
+        if (mergedCount > 0)
+        {
+            Log.MembersMerged(_logger, targetName ?? targetMemberId, mergedCount, groupId);
+        }
+        return result;
     }
 
     /// <inheritdoc />

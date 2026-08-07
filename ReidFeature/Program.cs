@@ -29,7 +29,8 @@ namespace ReidFeature
             // ── Kestrel 配置 ──────────────────────────────
             builder.WebHost.ConfigureKestrel(k =>
             {
-                k.Limits.MaxRequestBodySize = 20 * 1024 * 1024;
+                // 20MB 单视频；放大以支持"同一人多段注册"批量上传多段视频
+                k.Limits.MaxRequestBodySize = 100 * 1024 * 1024;
             });
 
             // ── 注册服务 ──────────────────────────────────
@@ -72,6 +73,15 @@ namespace ReidFeature
             app.MapPost("/family/enroll/{groupId}/{memberName}", EnrollmentHandler.HandleEnrollAsync)
                .WithName("FamilyEnroll")
                .Accepts<byte[]>("application/octet-stream");
+
+            // 同一人多段注册：multipart 一次上传多段视频，等权融合后合并为一条成员
+            app.MapPost("/family/enroll-batch/{groupId}/{memberName}", EnrollmentHandler.HandleBatchEnrollAsync)
+               .WithName("FamilyEnrollBatch")
+               .DisableAntiforgery();
+
+            // 成员合并去重：把同一人的多条成员记录融合为一条
+            app.MapPost("/family/merge/{groupId}", MergeHandler.HandleMergeAsync)
+               .WithName("FamilyMerge");
 
             app.MapDelete("/family/{groupId}/{memberId}", async (
                 string groupId,
